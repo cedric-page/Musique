@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from .config import charger_config, generer_config_exemple
+from .effets import ParametresChorus
 from .mixage import ParametresMixage
 from .pipeline import Options, executer
 from .separation import MODELE_PAR_DEFAUT, SeparateurDemucs
@@ -49,6 +50,13 @@ def construire_parseur() -> argparse.ArgumentParser:
         metavar="PISTE",
         help="pistes laissées à leur niveau d'origine par l'équilibrage (défaut : autre)",
     )
+    p.add_argument(
+        "--chorus",
+        type=float,
+        default=ParametresChorus.melange,
+        metavar="DOSAGE",
+        help=f"dosage du chorus sur les voix, 0 pour le désactiver (défaut : {ParametresChorus.melange})",
+    )
     p.add_argument("-v", "--verbeux", action="store_true", help="affiche plus de détails")
     return p
 
@@ -88,6 +96,7 @@ def main(argv: list[str] | None = None) -> int:
             gain_max_db=args.gain_max_db,
             exclues_equilibrage=set(args.exclure_equilibrage),
             lufs_cible=args.lufs_cible,
+            chorus={"voix": ParametresChorus(melange=args.chorus)} if args.chorus > 0 else {},
         ),
         debit_kbps=args.debit,
         forcer_separation=args.forcer_separation,

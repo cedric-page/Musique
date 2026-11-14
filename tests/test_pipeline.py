@@ -244,3 +244,45 @@ def test_nommage_date_titre_et_collisions(tmp_path, monkeypatch):
         "20260312-Le Sud.mp3",
         "20260312-jam.mp3",
     ]
+
+
+# --- Chorus ---------------------------------------------------------------
+
+from musique_repet.effets import ParametresChorus, chorus  # noqa: E402
+
+
+def test_chorus_leger():
+    voix = sinus(3, 440, 0.3)
+    traite = chorus(voix, SR)
+    assert traite.shape == voix.shape and np.all(np.isfinite(traite))
+    assert not np.allclose(traite, voix, atol=1e-3)  # l'effet est audible
+    rms = lambda a: float(np.sqrt(np.mean(a[SR:] ** 2)))  # noqa: E731
+    assert rms(traite) == pytest.approx(rms(voix), rel=0.25)  # niveau conservé
+    assert not np.allclose(traite[:, 0], traite[:, 1])  # élargissement stéréo
+
+
+def test_chorus_desactive():
+    voix = sinus(1)
+    assert np.array_equal(chorus(voix, SR, ParametresChorus(melange=0)), voix)
+
+
+def test_chorus_seulement_sur_les_voix(tmp_path, monkeypatch):
+    entree, sortie = tmp_path / "entree", tmp_path / "sortie"
+    entree.mkdir()
+    sf.write(entree / "r.wav", sinus(2), SR)
+    appels = []
+    original = chorus
+
+    def espion(audio, sr, params=ParametresChorus()):
+        appels.append(audio.shape)
+        return original(audio, sr, params)
+
+    monkeypatch.setattr("musique_repet.mixage.chorus", espion)
+    assert executer(options(entree, sortie), FauxSeparateur()) == 0
+    assert len(appels) == 1  # une seule piste « voix »
+
+    appels.clear()
+    opts = options(entree, sortie)
+    opts.mixage.chorus = {}
+    assert executer(opts, FauxSeparateur()) == 0
+    assert appels == []

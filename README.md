@@ -6,7 +6,8 @@ Traitement d'enregistrements de répétition (2 chanteuses, piano, batterie acou
 2. **Séparation** des instruments avec [Demucs](https://github.com/facebookresearch/demucs) (modèle `htdemucs_6s`) : `voix`, `piano`, `batterie`, `basse`, `guitare`, `autre`. Les pistes sont **conservées sur disque** : une relance ne refait la séparation que pour les morceaux qui ont changé.
 3. **Équilibrage** : la sonie (LUFS, norme ITU-R BS.1770) de chaque piste est mesurée, puis les pistes sont ramenées au même niveau.
 4. **Volumes personnalisés** : un facteur par instrument, lu dans un fichier JSON, est appliqué.
-5. **Mixage** de toutes les pistes, normalisé à -14 LUFS (crête max. -1 dBFS), puis export en **MP3** nommé `AAAAMMJJ-titre.mp3`.
+5. **Chorus léger sur les voix**, pour épaissir et élargir un peu le chant.
+6. **Mixage** de toutes les pistes, normalisé à -14 LUFS (crête max. -1 dBFS), puis export en **MP3** nommé `AAAAMMJJ-titre.mp3`.
 
 > Les deux chanteuses sont dans la même piste `voix` : Demucs sépare les instruments, pas les voix entre elles.
 
@@ -92,6 +93,7 @@ Si deux extraits donnent le même nom (même morceau joué deux fois le même jo
 | `--shifts 2` | séparation plus propre mais plus lente |
 | `--forcer-separation` | ignore le cache et refait la séparation |
 | `--lufs-cible -16` | sonie du MP3 final |
+| `--chorus 0.3` | dosage du chorus sur les voix (`0` = désactivé, `0.5` = plus marqué) |
 | `--debit 256` | débit MP3 en kb/s |
 | `--gain-max-db 12` | correction maximale de l'équilibrage, pour ne pas trop amplifier un instrument qui joue peu |
 | `--exclure-equilibrage autre` | pistes laissées à leur niveau d'origine par l'équilibrage (défaut : `autre`, qui contient surtout des résidus de séparation) |
