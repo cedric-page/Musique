@@ -218,3 +218,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Données audio locales
+*.wav
+*.mp3
+_travail/

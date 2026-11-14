@@ -1,1 +1,99 @@
 # Musique
+
+Traitement d'enregistrements de répétition (2 chanteuses, piano, batterie acoustique, basse, guitare) :
+
+1. **Découpe** : si un fichier `<nom>.csv` accompagne `<nom>.mp3` (ou `.wav`, `.flac`…), l'audio est découpé en morceaux enregistrés en `.wav`. Sans CSV, l'enregistrement complet est gardé en `.wav`.
+2. **Séparation** des instruments avec [Demucs](https://github.com/facebookresearch/demucs) (modèle `htdemucs_6s`) : `voix`, `piano`, `batterie`, `basse`, `guitare`, `autre`. Les pistes sont **conservées sur disque** : une relance ne refait la séparation que pour les morceaux qui ont changé.
+3. **Équilibrage** : la sonie (LUFS, norme ITU-R BS.1770) de chaque piste est mesurée, puis les pistes sont ramenées au même niveau.
+4. **Volumes personnalisés** : un facteur par instrument, lu dans un fichier JSON, est appliqué.
+5. **Mixage** de toutes les pistes, normalisé à -14 LUFS (crête max. -1 dBFS), puis export en **MP3**.
+
+> Les deux chanteuses sont dans la même piste `voix` : Demucs sépare les instruments, pas les voix entre elles.
+
+## Installation
+
+Il faut [uv](https://docs.astral.sh/uv/). `ffmpeg` est seulement nécessaire pour les formats que libsndfile ne lit pas (`.m4a`, `.aac`, `.wma`).
+
+```bash
+uv sync
+```
+
+Au premier lancement, Demucs télécharge les poids du modèle (~ 50 Mo) depuis `dl.fbaipublicfiles.com`.
+
+## Utilisation
+
+```bash
+uv run musique-repet <dossier_entree> <dossier_sortie> -c config.json
+```
+
+Générer un fichier de configuration d'exemple :
+
+```bash
+uv run musique-repet --generer-config config.json
+```
+
+### Fichier CSV de découpe
+
+Même nom que l'audio (`repet_12_mars.mp3` → `repet_12_mars.csv`), une ligne par morceau, `titre;debut;fin` :
+
+```csv
+titre;debut;fin
+Hallelujah;0:45;5:12
+Le Sud;6:30;10:02.5
+Hallelujah;1:02:10;1:06:40
+```
+
+- Temps acceptés : `83`, `83.5`, `1:23`, `1:23.5`, `1:02:03`.
+- La ligne d'en-tête est facultative ; les lignes vides ou commençant par `#` sont ignorées.
+- Un titre en double devient `Titre (2)`.
+
+### Fichier de configuration des volumes
+
+```json
+{
+  "voix": 1.0,
+  "piano": 1.0,
+  "batterie": 0.8,
+  "basse": 1.0,
+  "guitare": 1.0,
+  "autre": 0.5
+}
+```
+
+Facteurs **linéaires**, appliqués après l'équilibrage : `1.0` = inchangé, `0.5` ≈ -6 dB, `2.0` ≈ +6 dB, `0` = piste coupée (pratique pour travailler sa partie). Un instrument absent du fichier reste à `1.0`. Noms anglais acceptés aussi (`vocals`, `drums`, `bass`, `guitar`, `other`).
+
+### Organisation des fichiers produits
+
+```
+sortie/
+├── repet_12_mars/            # audio avec CSV : un MP3 par morceau
+│   ├── Hallelujah.mp3
+│   └── Le Sud.mp3
+├── jam_libre.mp3             # audio sans CSV : un seul MP3
+└── _travail/                 # fichiers intermédiaires (réutilisés à la relance)
+    ├── decoupes/             # morceaux découpés en .wav
+    └── pistes/               # pistes séparées, une par instrument
+```
+
+### Options utiles
+
+| Option | Rôle |
+| --- | --- |
+| `--travail DIR` | dossier des fichiers intermédiaires (défaut : `<sortie>/_travail`) |
+| `--appareil cuda` | séparation sur GPU (beaucoup plus rapide ; auto-détecté par défaut) |
+| `--shifts 2` | séparation plus propre mais plus lente |
+| `--forcer-separation` | ignore le cache et refait la séparation |
+| `--lufs-cible -16` | sonie du MP3 final |
+| `--debit 256` | débit MP3 en kb/s |
+| `--gain-max-db 12` | correction maximale de l'équilibrage, pour ne pas trop amplifier un instrument qui joue peu |
+| `--exclure-equilibrage autre` | pistes laissées à leur niveau d'origine par l'équilibrage (défaut : `autre`, qui contient surtout des résidus de séparation) |
+
+Une piste quasi muette (moins de -50 LUFS, instrument absent du morceau) n'est jamais amplifiée par l'équilibrage.
+
+## Tests
+
+```bash
+uv run pytest
+```
+
+Les tests utilisent un faux séparateur : ils ne téléchargent pas le modèle.
