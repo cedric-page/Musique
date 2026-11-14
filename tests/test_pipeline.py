@@ -11,7 +11,7 @@ from musique_repet.cli import main
 from musique_repet.config import CONFIG_EXEMPLE, charger_config
 from musique_repet.decoupe import lire_csv, parser_temps
 from musique_repet.mixage import ParametresMixage, calculer_equilibrage, mesurer_lufs
-from musique_repet.pipeline import Options, executer
+from musique_repet.pipeline import Options, date_creation, executer
 
 SR = 44100
 
@@ -143,9 +143,10 @@ def test_chaine_complete_avec_csv_et_cache(tmp_path):
     separateur = FauxSeparateur()
     assert executer(options(entree, sortie), separateur) == 0
 
-    mp3_a = sortie / "repet" / "Chanson A.mp3"
-    mp3_b = sortie / "repet" / "Chanson_B.mp3"
-    mp3_jam = sortie / "jam.mp3"
+    date_repet, date_jam = date_creation(entree / "repet.wav"), date_creation(entree / "jam.flac")
+    mp3_a = sortie / f"{date_repet}-Chanson A.mp3"
+    mp3_b = sortie / f"{date_repet}-Chanson_B.mp3"
+    mp3_jam = sortie / f"{date_jam}-jam.mp3"
     for mp3 in (mp3_a, mp3_b, mp3_jam):
         assert mp3.exists() and mp3.stat().st_size > 1000
     assert separateur.appels == 3
@@ -191,7 +192,7 @@ def test_volume_config_coupe_une_piste(tmp_path):
     opts = options(entree, sortie)
     opts.facteurs["piano"] = 0.0
     assert executer(opts, SeparateurDeuxPistes()) == 0
-    audio, sr = sf.read(sortie / "r.mp3", always_2d=True)
+    audio, sr = sf.read(next(sortie.glob("*-r.mp3")), always_2d=True)
     spectre = np.abs(np.fft.rfft(audio[sr : 2 * sr, 0]))
     freqs = np.fft.rfftfreq(sr, 1 / sr)
     energie = lambda f: spectre[(freqs > f - 20) & (freqs < f + 20)].sum()  # noqa: E731
@@ -205,7 +206,7 @@ def test_fichier_en_echec_n_arrete_pas_les_autres(tmp_path):
     sf.write(entree / "ko.wav", sinus(2), SR)
     (entree / "ko.csv").write_text("A;1.5;0.5\n", encoding="utf-8")
     assert executer(options(entree, sortie), FauxSeparateur()) == 1
-    assert (sortie / "ok.mp3").exists()
+    assert len(list(sortie.glob("*-ok.mp3"))) == 1
 
 
 def test_mesure_lufs_silence():
@@ -217,3 +218,29 @@ def test_ecrire_mp3_mono(tmp_path):
     chemin = tmp_path / "m.mp3"
     audio_io.ecrire_mp3(chemin, sinus(1, canaux=1)[:, 0], SR)
     assert sf.info(chemin).channels == 1
+
+
+def test_date_creation_format(tmp_path):
+    fichier = tmp_path / "a.wav"
+    fichier.write_bytes(b"")
+    date = date_creation(fichier)
+    assert len(date) == 8 and date.isdigit() and date.startswith("20")
+
+
+def test_nommage_date_titre_et_collisions(tmp_path, monkeypatch):
+    entree, sortie = tmp_path / "entree", tmp_path / "sortie"
+    entree.mkdir()
+    for nom in ("matin", "soir"):
+        sf.write(entree / f"{nom}.wav", sinus(4), SR)
+        (entree / f"{nom}.csv").write_text("Hallelujah;0;2\nLe Sud;2;4\n", encoding="utf-8")
+    sf.write(entree / "jam.wav", sinus(2), SR)
+    monkeypatch.setattr("musique_repet.pipeline.date_creation", lambda chemin: "20260312")
+
+    assert executer(options(entree, sortie), FauxSeparateur()) == 0
+    assert sorted(p.name for p in sortie.glob("*.mp3")) == [
+        "20260312-Hallelujah (2).mp3",
+        "20260312-Hallelujah.mp3",
+        "20260312-Le Sud (2).mp3",
+        "20260312-Le Sud.mp3",
+        "20260312-jam.mp3",
+    ]

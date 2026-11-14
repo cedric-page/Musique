@@ -6,7 +6,7 @@ Traitement d'enregistrements de répétition (2 chanteuses, piano, batterie acou
 2. **Séparation** des instruments avec [Demucs](https://github.com/facebookresearch/demucs) (modèle `htdemucs_6s`) : `voix`, `piano`, `batterie`, `basse`, `guitare`, `autre`. Les pistes sont **conservées sur disque** : une relance ne refait la séparation que pour les morceaux qui ont changé.
 3. **Équilibrage** : la sonie (LUFS, norme ITU-R BS.1770) de chaque piste est mesurée, puis les pistes sont ramenées au même niveau.
 4. **Volumes personnalisés** : un facteur par instrument, lu dans un fichier JSON, est appliqué.
-5. **Mixage** de toutes les pistes, normalisé à -14 LUFS (crête max. -1 dBFS), puis export en **MP3**.
+5. **Mixage** de toutes les pistes, normalisé à -14 LUFS (crête max. -1 dBFS), puis export en **MP3** nommé `AAAAMMJJ-titre.mp3`.
 
 > Les deux chanteuses sont dans la même piste `voix` : Demucs sépare les instruments, pas les voix entre elles.
 
@@ -64,16 +64,24 @@ Facteurs **linéaires**, appliqués après l'équilibrage : `1.0` = inchangé, `
 
 ### Organisation des fichiers produits
 
+Chaque MP3 est nommé `AAAAMMJJ-titre.mp3` :
+
+- `AAAAMMJJ` est la **date de création du fichier audio d'origine** ;
+- `titre` est le titre du morceau dans le CSV, ou le nom du fichier audio s'il n'y a pas de CSV.
+
 ```
 sortie/
-├── repet_12_mars/            # audio avec CSV : un MP3 par morceau
-│   ├── Hallelujah.mp3
-│   └── Le Sud.mp3
-├── jam_libre.mp3             # audio sans CSV : un seul MP3
+├── 20260312-Hallelujah.mp3   # repet_12_mars.mp3 + CSV : un MP3 par morceau
+├── 20260312-Le Sud.mp3
+├── 20260315-jam_libre.mp3    # jam_libre.wav sans CSV : un seul MP3
 └── _travail/                 # fichiers intermédiaires (réutilisés à la relance)
     ├── decoupes/             # morceaux découpés en .wav
     └── pistes/               # pistes séparées, une par instrument
 ```
+
+Si deux extraits donnent le même nom (même morceau joué deux fois le même jour), le suivant devient `20260312-Hallelujah (2).mp3`.
+
+> La date de création est fournie par macOS et Windows. Sous Linux, elle n'est disponible que sur certains systèmes de fichiers ; sinon la date de dernière modification est utilisée. Attention : copier un fichier remet souvent sa date de création à la date de la copie.
 
 ### Options utiles
 
