@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class ParametresAntiEcho:
-    rt60: float = 1.8
+    rt60: float = 1.0
     """Durée de réverbération de la salle en secondes (grande salle : 1,5 à 3 s)."""
     attenuation_max_db: float = 12.0
     """Atténuation maximale de la réverbération ; 0 désactive le traitement."""

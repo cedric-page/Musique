@@ -92,7 +92,7 @@ La réverbération d'une grande salle décroît de façon exponentielle. Pour ch
 
 Deux réglages :
 
-- `--rt60` : durée de réverbération de la salle, en secondes (défaut `1.8`). Pour l'estimer, frappe un coup sec (clap, caisse claire) et compte le temps jusqu'à ce que l'écho ne s'entende plus : c'est à peu près le RT60.
+- `--rt60` : durée de réverbération de la salle, en secondes (défaut `1`). Pour l'estimer, frappe un coup sec (clap, caisse claire) et compte le temps jusqu'à ce que l'écho ne s'entende plus : c'est à peu près le RT60.
 - `--anti-echo` : atténuation maximale en dB (défaut `12`, `0` pour désactiver). Au-delà d'environ 15 dB, le son peut devenir « métallique » ou « sous l'eau ».
 
 Changer ces réglages ne refait pas la séparation, seulement l'atténuation (quelques secondes par piste).
@@ -107,7 +107,7 @@ Changer ces réglages ne refait pas la séparation, seulement l'atténuation (qu
 | `--forcer-separation` | ignore le cache et refait la séparation |
 | `--lufs-cible -16` | sonie du MP3 final |
 | `--anti-echo 12` | atténuation max. de l'écho de la salle en dB (`0` = désactivé) |
-| `--rt60 1.8` | durée de réverbération de la salle en secondes |
+| `--rt60 1` | durée de réverbération de la salle en secondes |
 | `--chorus 0.3` | dosage du chorus sur les voix (`0` = désactivé, `0.5` = plus marqué) |
 | `--debit 256` | débit MP3 en kb/s |
 | `--gain-max-db 12` | correction maximale de l'équilibrage, pour ne pas trop amplifier un instrument qui joue peu |
