@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from .config import charger_config, generer_config_exemple
+from .echo import ParametresAntiEcho
 from .effets import ParametresChorus
 from .mixage import ParametresMixage
 from .pipeline import Options, executer
@@ -51,6 +52,23 @@ def construire_parseur() -> argparse.ArgumentParser:
         help="pistes laissées à leur niveau d'origine par l'équilibrage (défaut : autre)",
     )
     p.add_argument(
+        "--anti-echo",
+        type=float,
+        default=ParametresAntiEcho.attenuation_max_db,
+        metavar="DB",
+        help=(
+            "atténuation max. de l'écho de la salle sur chaque piste, 0 pour désactiver "
+            f"(défaut : {ParametresAntiEcho.attenuation_max_db:g} dB)"
+        ),
+    )
+    p.add_argument(
+        "--rt60",
+        type=float,
+        default=ParametresAntiEcho.rt60,
+        metavar="SECONDES",
+        help=f"durée de réverbération de la salle (défaut : {ParametresAntiEcho.rt60:g} s)",
+    )
+    p.add_argument(
         "--chorus",
         type=float,
         default=ParametresChorus.melange,
@@ -82,6 +100,8 @@ def main(argv: list[str] | None = None) -> int:
     if not args.entree.is_dir():
         parseur.error(f"dossier d'entrée introuvable : {args.entree}")
 
+    if args.rt60 <= 0:
+        parseur.error("--rt60 doit être positif")
     try:
         facteurs = charger_config(args.config)
     except (OSError, ValueError) as exc:
@@ -99,6 +119,7 @@ def main(argv: list[str] | None = None) -> int:
             chorus={"voix": ParametresChorus(melange=args.chorus)} if args.chorus > 0 else {},
         ),
         debit_kbps=args.debit,
+        anti_echo=ParametresAntiEcho(rt60=args.rt60, attenuation_max_db=args.anti_echo),
         forcer_separation=args.forcer_separation,
     )
     separateur = SeparateurDemucs(args.modele, appareil=args.appareil, shifts=args.shifts)

@@ -286,3 +286,81 @@ def test_chorus_seulement_sur_les_voix(tmp_path, monkeypatch):
     opts.mixage.chorus = {}
     assert executer(opts, FauxSeparateur()) == 0
     assert appels == []
+
+
+# --- Anti-écho ------------------------------------------------------------
+
+from scipy.signal import fftconvolve  # noqa: E402
+
+from musique_repet.echo import ParametresAntiEcho, attenuer_echo  # noqa: E402
+
+
+def salle(signal, rt60, sr=SR, graine=0):
+    """Simule une grande salle : réponse impulsionnelle à décroissance exponentielle."""
+    rng = np.random.default_rng(graine)
+    t = np.arange(int(rt60 * 1.5 * sr)) / sr
+    ri = rng.standard_normal(t.size) * np.exp(-3 * math.log(10) * t / rt60) * 0.05
+    ri[0] = 1.0  # son direct
+    return fftconvolve(signal, ri)[: signal.size].astype(np.float32)
+
+
+def notes_seches():
+    """Trois notes de 0,4 s séparées de silences de 1,6 s."""
+    t = np.arange(int(0.4 * SR)) / SR
+    note = (0.3 * np.sin(2 * np.pi * 330 * t) * np.hanning(t.size)).astype(np.float32)
+    silence = np.zeros(int(1.6 * SR), np.float32)
+    return np.concatenate([note, silence] * 3)
+
+
+def energie_db(a):
+    return 10 * math.log10(float(np.mean(a.astype(np.float64) ** 2)) + 1e-20)
+
+
+def test_anti_echo_reconstruction_parfaite_sans_traitement():
+    # Sans réverbération estimée, l'analyse / synthèse doit rendre le signal intact.
+    x = salle(notes_seches(), 1.0)[:, None]
+    y = attenuer_echo(x, SR, ParametresAntiEcho(surestimation=0.0))
+    assert np.max(np.abs(y - x)) < 1e-4
+
+
+def test_anti_echo_reduit_la_traine():
+    sec = notes_seches()
+    mouille = salle(sec, rt60=2.0)
+    traite = attenuer_echo(mouille[:, None], SR, ParametresAntiEcho(rt60=2.0))[:, 0]
+
+    # Traîne : entre 0,2 s et 1,6 s après la fin de chaque note (le signal sec y est muet).
+    traine = np.concatenate([np.arange(int((k * 2 + 0.6) * SR), int((k * 2 + 2.0) * SR)) for k in range(3)])
+    notes = np.concatenate([np.arange(int(k * 2 * SR), int((k * 2 + 0.4) * SR)) for k in range(3)])
+    gain_traine = energie_db(traite[traine]) - energie_db(mouille[traine])
+    gain_notes = energie_db(traite[notes]) - energie_db(mouille[notes])
+    assert gain_traine < -6  # la réverbération est nettement atténuée
+    assert gain_notes > -4  # les notes elles-mêmes sont préservées
+
+
+def test_anti_echo_desactive():
+    x = sinus(1)
+    assert np.array_equal(attenuer_echo(x, SR, ParametresAntiEcho(attenuation_max_db=0)), x)
+
+
+def test_anti_echo_mis_en_cache(tmp_path, monkeypatch):
+    entree, sortie = tmp_path / "entree", tmp_path / "sortie"
+    entree.mkdir()
+    sf.write(entree / "r.wav", sinus(2), SR)
+    appels = []
+    import musique_repet.echo as module_echo
+
+    original = module_echo.attenuer_echo
+    monkeypatch.setattr(module_echo, "attenuer_echo", lambda *a: appels.append(1) or original(*a))
+
+    assert executer(options(entree, sortie), FauxSeparateur()) == 0
+    nb = len(appels)
+    assert nb == len(FauxSeparateur.niveaux)  # une fois par piste
+    assert len(list((sortie / "_travail" / "pistes" / "r" / "sans_echo").glob("*.wav"))) == nb
+
+    assert executer(options(entree, sortie), FauxSeparateur()) == 0
+    assert len(appels) == nb  # réutilisé
+
+    opts = options(entree, sortie)
+    opts.anti_echo = ParametresAntiEcho(rt60=2.5)
+    assert executer(opts, FauxSeparateur()) == 0
+    assert len(appels) == 2 * nb  # réglage changé : retraité

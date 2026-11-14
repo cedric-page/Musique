@@ -6,12 +6,13 @@ import logging
 import math
 import sys
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
 from . import audio_io
 from .decoupe import Morceau, lire_csv, nom_fichier_sur
+from .echo import ParametresAntiEcho, attenuer_echo_avec_cache
 from .mixage import ParametresMixage, ReglagePiste, mixer
 from .separation import Separateur, separer_avec_cache
 
@@ -37,6 +38,7 @@ class Options:
     mixage: ParametresMixage
     debit_kbps: int = 192
     forcer_separation: bool = False
+    anti_echo: ParametresAntiEcho = field(default_factory=ParametresAntiEcho)
 
 
 def _cles_sources(fichiers: list[Path]) -> dict[Path, str]:
@@ -134,6 +136,7 @@ def _journaliser_reglages(reglages: list[ReglagePiste]) -> None:
 def traiter_tache(tache: Tache, separateur: Separateur, options: Options) -> None:
     log.info("▶ %s", tache.nom_affiche)
     pistes = separer_avec_cache(tache.wav, tache.dossier_pistes, separateur, options.forcer_separation)
+    pistes = attenuer_echo_avec_cache(pistes, tache.dossier_pistes / "sans_echo", options.anti_echo)
     mix, sr, reglages = mixer(pistes, options.facteurs, options.mixage)
     _journaliser_reglages(reglages)
     audio_io.ecrire_mp3(tache.mp3, mix, sr, options.debit_kbps)

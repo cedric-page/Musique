@@ -4,10 +4,11 @@ Traitement d'enregistrements de répétition (2 chanteuses, piano, batterie acou
 
 1. **Découpe** : si un fichier `<nom>.csv` accompagne `<nom>.mp3` (ou `.wav`, `.flac`…), l'audio est découpé en morceaux enregistrés en `.wav`. Sans CSV, l'enregistrement complet est gardé en `.wav`.
 2. **Séparation** des instruments avec [Demucs](https://github.com/facebookresearch/demucs) (modèle `htdemucs_6s`) : `voix`, `piano`, `batterie`, `basse`, `guitare`, `autre`. Les pistes sont **conservées sur disque** : une relance ne refait la séparation que pour les morceaux qui ont changé.
-3. **Équilibrage** : la sonie (LUFS, norme ITU-R BS.1770) de chaque piste est mesurée, puis les pistes sont ramenées au même niveau.
-4. **Volumes personnalisés** : un facteur par instrument, lu dans un fichier JSON, est appliqué.
-5. **Chorus léger sur les voix**, pour épaissir et élargir un peu le chant.
-6. **Mixage** de toutes les pistes, normalisé à -14 LUFS (crête max. -1 dBFS), puis export en **MP3** nommé `AAAAMMJJ-titre.mp3`.
+3. **Atténuation de l'écho** de la salle sur chaque piste séparée (voir plus bas). Le résultat est aussi gardé sur disque.
+4. **Équilibrage** : la sonie (LUFS, norme ITU-R BS.1770) de chaque piste est mesurée, puis les pistes sont ramenées au même niveau.
+5. **Volumes personnalisés** : un facteur par instrument, lu dans un fichier JSON, est appliqué.
+6. **Chorus léger sur les voix**, pour épaissir et élargir un peu le chant.
+7. **Mixage** de toutes les pistes, normalisé à -14 LUFS (crête max. -1 dBFS), puis export en **MP3** nommé `AAAAMMJJ-titre.mp3`.
 
 > Les deux chanteuses sont dans la même piste `voix` : Demucs sépare les instruments, pas les voix entre elles.
 
@@ -78,11 +79,23 @@ sortie/
 └── _travail/                 # fichiers intermédiaires (réutilisés à la relance)
     ├── decoupes/             # morceaux découpés en .wav
     └── pistes/               # pistes séparées, une par instrument
+        └── …/sans_echo/      # les mêmes après atténuation de l'écho
 ```
 
 Si deux extraits donnent le même nom (même morceau joué deux fois le même jour), le suivant devient `20260312-Hallelujah (2).mp3`.
 
 > La date de création est fournie par macOS et Windows. Sous Linux, elle n'est disponible que sur certains systèmes de fichiers ; sinon la date de dernière modification est utilisée. Attention : copier un fichier remet souvent sa date de création à la date de la copie.
+
+### Atténuation de l'écho
+
+La réverbération d'une grande salle décroît de façon exponentielle. Pour chaque piste, le programme estime à chaque instant et pour chaque fréquence la part de son qui n'est que la traîne des notes précédentes, puis la retire (soustraction spectrale, méthode de Lebart / Habets). Les 50 premières millisecondes après chaque son sont conservées, car elles donnent du corps au son ; seule la traîne est atténuée.
+
+Deux réglages :
+
+- `--rt60` : durée de réverbération de la salle, en secondes (défaut `1.8`). Pour l'estimer, frappe un coup sec (clap, caisse claire) et compte le temps jusqu'à ce que l'écho ne s'entende plus : c'est à peu près le RT60.
+- `--anti-echo` : atténuation maximale en dB (défaut `12`, `0` pour désactiver). Au-delà d'environ 15 dB, le son peut devenir « métallique » ou « sous l'eau ».
+
+Changer ces réglages ne refait pas la séparation, seulement l'atténuation (quelques secondes par piste).
 
 ### Options utiles
 
@@ -93,6 +106,8 @@ Si deux extraits donnent le même nom (même morceau joué deux fois le même jo
 | `--shifts 2` | séparation plus propre mais plus lente |
 | `--forcer-separation` | ignore le cache et refait la séparation |
 | `--lufs-cible -16` | sonie du MP3 final |
+| `--anti-echo 12` | atténuation max. de l'écho de la salle en dB (`0` = désactivé) |
+| `--rt60 1.8` | durée de réverbération de la salle en secondes |
 | `--chorus 0.3` | dosage du chorus sur les voix (`0` = désactivé, `0.5` = plus marqué) |
 | `--debit 256` | débit MP3 en kb/s |
 | `--gain-max-db 12` | correction maximale de l'équilibrage, pour ne pas trop amplifier un instrument qui joue peu |
