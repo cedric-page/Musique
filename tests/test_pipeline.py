@@ -279,7 +279,7 @@ def test_chorus_seulement_sur_les_voix(tmp_path, monkeypatch):
 
     monkeypatch.setattr("musique_repet.mixage.chorus", espion)
     assert executer(options(entree, sortie), FauxSeparateur()) == 0
-    assert len(appels) == 1  # une seule piste « voix »
+    assert len(appels) == 2  # « voix » et « basse »
 
     appels.clear()
     opts = options(entree, sortie)
@@ -364,3 +364,19 @@ def test_anti_echo_mis_en_cache(tmp_path, monkeypatch):
     opts.anti_echo = ParametresAntiEcho(rt60=2.5)
     assert executer(opts, FauxSeparateur()) == 0
     assert len(appels) == 2 * nb  # réglage changé : retraité
+
+
+def test_chorus_basse_epargne_les_graves():
+    from musique_repet.effets import CHORUS_BASSE
+
+    grave = sinus(3, 60, 0.3)  # fondamentale de basse
+    aigu = sinus(3, 1200, 0.1)  # harmonique
+    traite_grave = chorus(grave, SR, CHORUS_BASSE)
+    traite_aigu = chorus(aigu, SR, CHORUS_BASSE)
+    rms = lambda a: float(np.sqrt(np.mean(a[SR:] ** 2)))  # noqa: E731
+    # Les graves gardent leur niveau, en mono : pas d'élargissement stéréo.
+    assert rms(traite_grave) == pytest.approx(rms(grave), rel=0.05)
+    milieu = slice(SR, 2 * SR)  # hors démarrage / arrêt brusques de la sinusoïde de test
+    assert np.allclose(traite_grave[milieu, 0], traite_grave[milieu, 1], atol=1e-3)
+    # Les aigus reçoivent bien l'effet.
+    assert not np.allclose(traite_aigu[:, 0], traite_aigu[:, 1], atol=1e-3)

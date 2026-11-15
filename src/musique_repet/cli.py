@@ -5,11 +5,12 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 from .config import charger_config, generer_config_exemple
 from .echo import ParametresAntiEcho
-from .effets import ParametresChorus
+from .effets import CHORUS_BASSE, ParametresChorus
 from .mixage import ParametresMixage
 from .pipeline import Options, executer
 from .separation import MODELE_PAR_DEFAUT, SeparateurDemucs
@@ -75,6 +76,16 @@ def construire_parseur() -> argparse.ArgumentParser:
         metavar="DOSAGE",
         help=f"dosage du chorus sur les voix, 0 pour le désactiver (défaut : {ParametresChorus.melange})",
     )
+    p.add_argument(
+        "--chorus-basse",
+        type=float,
+        default=CHORUS_BASSE.melange,
+        metavar="DOSAGE",
+        help=(
+            f"dosage du chorus sur la basse (au-dessus de {CHORUS_BASSE.coupure_hz:g} Hz), "
+            f"0 pour le désactiver (défaut : {CHORUS_BASSE.melange})"
+        ),
+    )
     p.add_argument("-v", "--verbeux", action="store_true", help="affiche plus de détails")
     return p
 
@@ -116,7 +127,14 @@ def main(argv: list[str] | None = None) -> int:
             gain_max_db=args.gain_max_db,
             exclues_equilibrage=set(args.exclure_equilibrage),
             lufs_cible=args.lufs_cible,
-            chorus={"voix": ParametresChorus(melange=args.chorus)} if args.chorus > 0 else {},
+            chorus={
+                nom: params
+                for nom, params in (
+                    ("voix", ParametresChorus(melange=args.chorus)),
+                    ("basse", replace(CHORUS_BASSE, melange=args.chorus_basse)),
+                )
+                if params.melange > 0
+            },
         ),
         debit_kbps=args.debit,
         anti_echo=ParametresAntiEcho(rt60=args.rt60, attenuation_max_db=args.anti_echo),

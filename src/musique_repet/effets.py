@@ -6,6 +6,7 @@ import math
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.signal import butter, sosfiltfilt
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,13 @@ class ParametresChorus:
     """Amplitude de la variation du retard (désaccord)."""
     vitesses_hz: tuple[float, ...] = (0.6, 0.9)
     """Vitesse de modulation de chaque voix du chorus."""
+    coupure_hz: float = 0.0
+    """Si > 0, seules les fréquences au-dessus reçoivent le chorus ; les graves
+    restent intacts (indispensable sur une basse pour garder un bas du spectre net)."""
+
+
+CHORUS_BASSE = ParametresChorus(melange=0.4, coupure_hz=250.0, vitesses_hz=(0.5, 0.7))
+"""Chorus de basse : un peu plus dosé et plus lent, graves épargnés sous 250 Hz."""
 
 
 def chorus(audio: np.ndarray, sr: int, params: ParametresChorus = ParametresChorus()) -> np.ndarray:
@@ -33,6 +41,14 @@ def chorus(audio: np.ndarray, sr: int, params: ParametresChorus = ParametresChor
         return audio.copy()
     if len(params.retards_ms) != len(params.vitesses_hz):
         raise ValueError("retards_ms et vitesses_hz doivent avoir la même longueur")
+    if params.coupure_hz > 0:
+        # Séparation graves / aigus. Le filtre est à phase nulle (aller-retour) :
+        # « signal - graves » ne contient alors vraiment que les aigus, et la somme est exacte.
+        sos = butter(2, params.coupure_hz, btype="lowpass", fs=sr, output="sos")
+        graves = sosfiltfilt(sos, audio, axis=0).astype(audio.dtype)
+        aigus = audio - graves
+        sans_coupure = ParametresChorus(params.melange, params.retards_ms, params.profondeur_ms, params.vitesses_hz)
+        return graves + chorus(aigus, sr, sans_coupure)
 
     nb, canaux = audio.shape
     sortie = np.empty_like(audio)

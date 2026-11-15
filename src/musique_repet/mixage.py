@@ -11,7 +11,7 @@ import numpy as np
 import pyloudnorm
 
 from . import audio_io
-from .effets import ParametresChorus, chorus
+from .effets import CHORUS_BASSE, ParametresChorus, chorus
 
 log = logging.getLogger(__name__)
 
@@ -48,7 +48,9 @@ class ParametresMixage:
     """Sonie du mixage final."""
     crete_max_db: float = -1.0
     """Crête maximale du mixage final (dBFS)."""
-    chorus: dict[str, ParametresChorus] = field(default_factory=lambda: {"voix": ParametresChorus()})
+    chorus: dict[str, ParametresChorus] = field(
+        default_factory=lambda: {"voix": ParametresChorus(), "basse": CHORUS_BASSE}
+    )
     """Pistes recevant un chorus, avec leurs réglages."""
 
 
