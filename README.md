@@ -156,7 +156,7 @@ Si une ballade est mesurée au double de son vrai tempo (par exemple 144 au lieu
 
 ### Justesse du chant
 
-Pour chaque morceau, deux analyses montrent si chaque voix est juste **par rapport à la musique**, et à quels moments elle ne l'est pas :
+Pour chaque morceau, deux analyses montrent si chaque voix est juste **par rapport aux accords joués par le groupe à chaque instant** (et non par rapport à la tonalité du morceau), et à quels moments elle ne l'est pas :
 
 - `…-justesse-lead.jpg` : la **voix lead**, celle qui porte la mélodie ;
 - `…-justesse-harmonie.jpg` : la **voix d'harmonie**, la seconde voix qui chante en même temps (tierce, sixte...) ; ce graphique n'est produit que si une harmonie est détectée.
@@ -165,22 +165,26 @@ Pour chaque morceau, deux analyses montrent si chaque voix est juste **par rappo
 
 ![Exemple : justesse de l'harmonie](docs/exemple-justesse-harmonie.jpg)
 
-*Exemple obtenu sur un chant synthétique : le lead est juste, sauf une baisse au milieu du premier refrain (0:40-0:48) et deux fausses notes hors de l'harmonie (croix) ; l'harmonie, à la tierce au-dessus, est juste dans le premier refrain mais chante environ 30 cents trop bas dans le second (1:20-1:40).*
+*Exemple obtenu sur un chant synthétique, sur la grille Do – Sol – La m – Fa : le lead est juste, sauf une baisse au milieu du premier refrain (0:40-0:48) et cinq notes qui frottent avec l'accord (croix, par exemple « Si sur Do ») ; l'harmonie, à la tierce au-dessus, est juste dans le premier refrain mais chante environ 30 cents trop bas dans le second (1:20-1:40).*
 
-**Panneau du haut, note par note** : chaque trait est une note chantée, à sa hauteur d'écart avec la note juste, en **cents** (100 cents = un demi-ton). Au-dessus de 0, la note est trop haute ; en dessous, trop basse.
+**Bande des accords**, en haut : les accords joués par le groupe (piano, guitare, basse), reconnus automatiquement. Chaque note chantée est comparée à l'accord joué au même moment.
+
+**Panneau principal, note par note** : chaque trait est une note chantée, à sa hauteur d'écart avec la note juste, en **cents** (100 cents = un demi-ton). Au-dessus de 0, la note est trop haute ; en dessous, trop basse.
 
 - **vert** : juste (moins de 20 cents d'écart) ;
 - **jaune** : approximatif (20 à 40 cents), ça s'entend sur une note tenue ;
 - **rouge** : faux (plus de 40 cents, presque entre deux notes) ;
-- **croix** : note **hors de l'harmonie**, nommée sur le graphique : une note chantée bien droite, mais qui n'est ni dans la tonalité du morceau ni dans ce que jouent les instruments à ce moment-là (une vraie fausse note, pas un défaut de justesse).
+- **croix** : note **qui frotte avec l'accord**, nommée sur le graphique (« Fa sur Do ») : une note tenue (au moins 0,45 s, une noire à 130 BPM) qui n'est pas dans l'accord joué et se trouve à un demi-ton d'une de ses notes (le Fa frotte avec le Mi de l'accord de Do), même chantée bien droite. C'est une fausse note, pas un défaut de justesse. Les notes de passage (courtes, ou à un ton des notes de l'accord, comme Ré sur Do) ne sont pas comptées comme fausses.
 
 **Panneau du bas, toutes les 8 secondes** : la part du chant juste, pour repérer d'un coup d'œil les passages à retravailler.
 
-**En-tête** : part du chant juste et durée chantée par cette voix, tendance générale (« un peu bas » si la chanteuse a tendance à chanter sous la note), nombre de fausses notes et tonalité détectée.
+**En-tête** : part du chant juste et durée chantée par cette voix, tendance générale (« un peu bas » si la chanteuse a tendance à chanter sous la note) et nombre de fausses notes.
 
 Comment c'est mesuré :
 
-- la référence est **l'accordage réel du groupe**, mesuré sur le piano, la guitare et la basse (affiché dans le sous-titre, par exemple « La = 436,2 Hz ») : si les instruments sont accordés un peu bas, les chanteuses doivent chanter un peu bas avec eux. Sans instrument mélodique (a cappella), la référence est l'accordage moyen des voix ;
+- la référence est **l'accord joué à chaque instant** : il est reconnu sur le piano, la guitare et la basse séparés (accords majeurs, mineurs, de septième et mineurs septième), et son accordage est mesuré sur les instruments pendant qu'il est joué. Si le groupe est accordé un peu bas, ou si une guitare se désaccorde en cours de morceau, les chanteuses sont comparées à ce qu'elles entendent réellement ;
+- une note qui tombe entre deux notes est rattachée à la note de l'accord : un Mi chanté 55 cents trop bas sur un accord de La m est un Mi (de l'accord) très bas, pas un Mi bémol un peu haut ;
+- sans instrument mélodique (a cappella), la référence est l'accordage moyen des voix ;
 - la hauteur est suivie sur la piste voix séparée, **pour une voix seule ou deux voix qui chantent ensemble** (harmonies en tierce, sixte...) : chacune est mesurée séparément ;
 - les voix sont ensuite réparties entre **lead** et **harmonie** :
   - une voix qui chante seule est le lead (c'est elle qui porte la mélodie) ;
@@ -193,7 +197,8 @@ Les seuils se règlent : `--tolerance-cents 25` est plus indulgent, `--tolerance
 > Limites :
 > - deux voix à l'unisson sont mesurées comme une seule (leur moyenne), comptée au lead ;
 > - si les deux chanteuses chantent ensemble du début à la fin, au même volume et sans passage seul, rien ne permet de savoir laquelle porte la mélodie : les deux analyses restent justes, mais les étiquettes « lead » et « harmonie » peuvent être inversées ;
-> - une « blue note » volontaire (tierce mineure sur un accord majeur, par exemple) peut être marquée hors de l'harmonie : les croix sont des notes **à vérifier à l'écoute**.
+> - une « blue note » volontaire (tierce mineure sur un accord majeur), une appoggiature ou une quarte suspendue tenues frottent avec l'accord et seront marquées d'une croix : les croix sont des notes **à vérifier à l'écoute** ;
+> - les accords plus riches (sus4, diminués, neuvièmes...) sont reconnus comme l'accord simple le plus proche : une note chantée qui appartient au vrai accord peut alors être marquée comme frottant avec lui.
 
 ### Options utiles
 

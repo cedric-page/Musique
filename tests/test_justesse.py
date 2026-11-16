@@ -4,6 +4,7 @@ import soundfile as sf
 from PIL import Image
 
 from chant_synthetique import ACCORDS, MELODIE, SR, accompagnement, voix
+from musique_repet.accords import Accord, reconnaitre_accords
 from musique_repet.graphique_justesse import tracer
 from musique_repet.hauteur import Contours, attribuer_voix
 from musique_repet.justesse import (
@@ -12,7 +13,7 @@ from musique_repet.justesse import (
     analyser_justesse,
     combler_trous,
     decouper_notes,
-    tonalite,
+    evaluer_note,
 )
 
 ACCORDAGE = -14  # le groupe est accordé un peu bas : La = 436,5 Hz
@@ -41,10 +42,11 @@ def melodie(tmp_path_factory):
     return resultat.lead
 
 
-def test_accordage_et_tonalite_du_groupe(melodie):
+def test_accords_et_accordage_du_groupe(melodie):
     assert melodie.reference == "instruments"
     assert melodie.accordage_cents == pytest.approx(ACCORDAGE, abs=3)
-    assert melodie.tonalite == "Do majeur"
+    assert [a.nom for a in melodie.accords] == ["Do", "Sol", "La m", "Fa"] * 2
+    assert all(a.accordage_cents == pytest.approx(ACCORDAGE, abs=3) for a in melodie.accords)
 
 
 def test_chaque_note_mesuree(melodie):
@@ -59,15 +61,66 @@ def test_categories(melodie):
     categories = {debut: melodie.categorie(note_proche(melodie, debut)) for debut, *_ in MELODIE}
     assert categories[0.1] == "juste"
     assert categories[3.1] == "approximatif"  # +30 cents
-    assert categories[5.1] == "faux"  # -50 cents : Mi chanté très bas, pas Mi bémol trop haut
+    assert categories[5.1] == "faux"  # -50 cents sur La m : Mi (note de l'accord) très bas, pas Mi bémol trop haut
     assert note_proche(melodie, 5.1).visee == 76
     assert categories[10.1] == "approximatif"  # -25 cents
+    assert categories[12.1] == "faux"  # -45 cents
 
 
-def test_fausse_note_hors_harmonie(melodie):
-    hors = [n for n in melodie.notes if n.hors_harmonie]
-    assert len(hors) == 1 and hors[0].nom == "Fa♯5"  # chanté bien droit, mais faux sur l'accord de Do
-    assert abs(hors[0].ecart) < 10 and melodie.categorie(hors[0]) == "faux"
+def test_place_dans_l_accord(melodie):
+    assert (note_proche(melodie, 0.1).accord, note_proche(melodie, 0.1).degre) == ("Do", "fondamentale")
+    assert (note_proche(melodie, 1.1).accord, note_proche(melodie, 1.1).degre) == ("Do", "tierce")
+    assert (note_proche(melodie, 11.1).accord, note_proche(melodie, 11.1).degre) == ("Sol", "quinte")
+    passage = note_proche(melodie, 10.1)  # La sur Sol : note de passage, ne frotte pas (un ton du Sol)
+    assert passage.degre is None and not passage.dissonante
+
+
+def test_note_qui_frotte_avec_l_accord(melodie):
+    frottent = melodie.dissonantes
+    assert len(frottent) == 1 and frottent[0].nom == "Fa♯5"  # chanté bien droit, mais frotte avec le Sol
+    assert frottent[0].accord == "Do" and frottent[0].degre is None
+    assert abs(frottent[0].ecart) < 10 and melodie.categorie(frottent[0]) == "faux"
+
+
+def test_note_entre_deux_rattachee_a_l_accord():
+    la_mineur = [Accord(0, 4, 9, "m", -10.0)]
+    # 55 cents sous Mi (note de l'accord) = 45 cents au-dessus de Mi bémol : c'est un Mi très bas.
+    note = evaluer_note(0.5, 1.5, 76 - 0.55 - 0.10, -10.0, la_mineur)
+    assert (note.visee, round(note.ecart)) == (76, -55) and note.degre == "quinte"
+    # Entre Fa et Fa dièse, aucun des deux n'est dans l'accord : la note la plus proche est gardée.
+    note = evaluer_note(0.5, 1.5, 77.45 - 0.10, -10.0, la_mineur)
+    assert (note.visee, round(note.ecart)) == (77, 45) and note.degre is None
+    # Sans accord, l'accordage général sert de référence.
+    note = evaluer_note(5.0, 6.0, 72.1 - 0.10, -10.0, la_mineur)
+    assert (note.visee, round(note.ecart), note.accord) == (72, 10, "")
+
+
+def test_comparaison_a_l_accordage_de_chaque_accord(tmp_path):
+    # La guitare est réaccordée à mi-morceau (de -14 à +10 cents) ; les chanteuses suivent :
+    # comparées aux accords du moment, elles sont justes partout.
+    justes = [(d, l, m, 0) for d, l, m, _ in MELODIE if m != 78]
+    avant = [n for n in justes if n[0] < 8]
+    apres = [n for n in justes if n[0] >= 8]
+    chant = voix(16, avant, -14) + voix(16, apres, 10)
+    piano = accompagnement(16, ACCORDS[:4], -14) + accompagnement(16, ACCORDS[4:], 10)
+    analyse = analyser_justesse(ecrire(tmp_path, voix=chant, piano=piano)).lead
+    assert all(a.accordage_cents < 0 for a in analyse.accords[:3])  # avant le réaccordage
+    assert all(a.accordage_cents > 0 for a in analyse.accords[-3:])  # après
+    assert all(abs(n.ecart) < 10 for n in analyse.notes)
+
+
+def test_reconnaitre_accords():
+    import librosa
+
+    def accords_de(grille, duree, accordage=0.0):
+        signal = librosa.resample(accompagnement(duree, grille, accordage), orig_sr=SR, target_sr=22050)
+        return [(round(a.debut), a.nom) for a in reconnaitre_accords(signal, accordage)]
+
+    septiemes = [(0, 2, [48, 60, 64, 67]), (2, 2, [45, 57, 60, 64, 67]), (4, 2, [50, 62, 65, 69]),
+                 (6, 2, [43, 59, 62, 65, 67])]
+    assert accords_de(septiemes, 8) == [(0, "Do"), (2, "La m7"), (4, "Ré m"), (6, "Sol7")]
+    avec_silence = [(0, 2, [48, 60, 64, 67]), (6, 2, [43, 59, 62, 67])]
+    assert [nom for _, nom in accords_de(avec_silence, 8)] == ["Do", "", "Sol"]  # rien de joué entre les deux
 
 
 # --- Lead et harmonie -------------------------------------------------------------
@@ -160,7 +213,7 @@ def test_a_cappella_reference_des_voix(tmp_path):
     # Sans instrument, la référence est l'accordage moyen des voix elles-mêmes.
     notes = [(d, l, m, 0) for d, l, m, _ in MELODIE if m != 78]
     analyse = analyser_justesse(ecrire(tmp_path, voix=voix(16, notes, 30))).lead
-    assert analyse.reference == "voix" and analyse.tonalite is None
+    assert analyse.reference == "voix" and analyse.accords == []
     assert analyse.accordage_cents == pytest.approx(30, abs=4)
     assert analyse.part_juste > 0.95
 
@@ -195,20 +248,9 @@ def test_combler_trous():
     assert np.isnan(resultat[7:11]).all()  # trou trop long
 
 
-def test_tonalite():
-    do_majeur = np.zeros(12)
-    do_majeur[[0, 4, 7]] = 3
-    do_majeur[[2, 5, 9, 11]] = 1
-    assert tonalite(do_majeur) == (0, "majeur")
-    la_mineur = np.zeros(12)
-    la_mineur[[9, 0, 4]] = 3
-    la_mineur[[11, 2, 5, 7]] = 1
-    assert tonalite(la_mineur) == (9, "mineur")
-
-
 def test_tranches():
     notes = [Note(1, 3, 60, 60, 0), Note(3, 7, 62, 62, -30), Note(9, 11, 64, 64, 5), Note(17.5, 17.8, 60, 60, 0)]
-    analyse = AnalyseJustesse(20, notes, 0.0, "instruments", "Do majeur")
+    analyse = AnalyseJustesse(20, notes, 0.0, "instruments")
     tranches = analyse.tranches(8)
     assert [(a, b) for a, b, _ in tranches] == [(0, 8), (8, 16)]  # la dernière tranche chante trop peu
     assert tranches[0][2] == pytest.approx(2 / 6)
@@ -220,9 +262,9 @@ def test_graphique_jpg(tmp_path, melodie, cas):
     if cas == "lead":
         analyse = melodie
     elif cas == "harmonie":
-        analyse = AnalyseJustesse(16, melodie.notes[:5], -14.0, "instruments", "Do majeur", voix="harmonie")
+        analyse = AnalyseJustesse(16, melodie.notes[:5], -14.0, "instruments", melodie.accords, voix="harmonie")
     else:
-        analyse = AnalyseJustesse(16, [], 0.0, "instruments", None)
+        analyse = AnalyseJustesse(16, [], 0.0, "instruments")
     chemin = tmp_path / "20260312-Essai-justesse.jpg"
     tracer(analyse, chemin, "Essai", "20260312")
     with Image.open(chemin) as image:

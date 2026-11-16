@@ -54,7 +54,7 @@ def accompagnement(duree, accords, accordage_cents=0.0):
 GRILLE = [(0, [48, 60, 64, 67]), (2, [43, 59, 62, 67]), (4, [45, 60, 64, 69]), (6, [41, 60, 65, 69])]
 ACCORDS = [(k * 8 + d, 2.0, notes) for k in range(2) for d, notes in GRILLE]
 
-# Mélodie : (début, durée, note visée, écart en cents). Notes de l'accord ou de la gamme de Do majeur.
+# Mélodie : (début, durée, note visée, écart en cents), sur la grille Do – Sol – La m – Fa.
 MELODIE = [
     (0.1, 0.9, 72, 0),      # Do4  juste
     (1.1, 0.8, 76, 5),      # Mi   juste
@@ -65,10 +65,10 @@ MELODIE = [
     (6.1, 0.9, 77, 10),     # Fa   juste
     (7.1, 0.8, 72, 0),      # Do   juste
     (8.1, 0.9, 79, 0),      # Sol  juste
-    (9.1, 0.8, 78, 0),      # Fa dièse sur l'accord de Do : fausse note (hors gamme), chantée bien droite
-    (10.1, 0.9, 69, -25),   # La   approximatif (trop bas)
-    (11.1, 0.8, 72, 15),    # Do   juste
-    (12.1, 0.9, 77, -42),   # Fa   faux (trop bas)
+    (9.1, 0.8, 78, 0),      # Fa dièse sur l'accord de Do : frotte avec le Sol, même chanté bien droit
+    (10.1, 0.9, 69, -25),   # La   approximatif (trop bas), note de passage sur Sol
+    (11.1, 0.8, 74, 15),    # Ré   juste (note de l'accord de Sol)
+    (12.1, 0.9, 72, -45),   # Do   faux (trop bas), tierce de l'accord de La m
     (13.1, 0.8, 76, 0),     # Mi   juste
     (14.1, 1.6, 72, 0),     # Do   juste (note tenue)
 ]

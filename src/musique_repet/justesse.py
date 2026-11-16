@@ -1,19 +1,21 @@
-"""Justesse du chant par rapport à la musique.
+"""Justesse du chant par rapport aux accords joués par le groupe.
 
-1. **Accordage du groupe** : estimé sur les pistes piano, guitare et basse. La
-   voix est jugée par rapport aux instruments, pas par rapport au La 440
-   théorique : un groupe accordé à La = 437 Hz n'a pas tort, et les
-   chanteuses doivent chanter avec lui.
+1. **Accords en cours** : reconnus sur les pistes piano, guitare et basse (voir
+   ``accords.py``), avec l'accordage des instruments pendant chaque accord. Le
+   chant est comparé à ce que joue le groupe à ce moment-là, pas au La 440
+   théorique ni à la tonalité du morceau.
 2. **Hauteur chantée** : suivie sur la piste voix séparée, pour une voix seule
    ou deux voix ensemble (voir ``hauteur.py``), puis répartie entre la **voix
    lead** et la voix d'**harmonie**, analysées séparément. Chaque voix est
    découpée en notes, mesurées sur leur centre : l'attaque glissée et le
    vibrato ne sont pas comptés comme des erreurs.
-3. **Écart** de chaque note à la note juste la plus proche, en cents
-   (100 cents = un demi-ton). Quand une note tombe entre deux, la tonalité
-   départage la note visée (Mi chanté très bas plutôt que Mi bémol trop haut).
-4. **Fausse note** : note tenue hors de la tonalité et absente de ce que jouent
-   les instruments au même moment, même chantée bien droite.
+3. **Écart** de chaque note à la note juste visée, en cents (100 cents = un
+   demi-ton). Quand une note tombe entre deux, la note de l'accord en cours
+   est retenue comme note visée (Mi chanté très bas sur un accord de La m,
+   plutôt que Mi bémol trop haut).
+4. **Note qui frotte avec l'accord** : note tenue qui n'est pas dans l'accord
+   et se trouve à un demi-ton d'une de ses notes (Fa sur un accord de Do, qui
+   frotte avec le Mi), même chantée bien droite.
 """
 
 from __future__ import annotations
@@ -21,28 +23,23 @@ from __future__ import annotations
 import logging
 import math
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 from scipy.ndimage import median_filter
 
 from . import audio_io
+from .accords import NOMS_NOTES, Accord, accord_pendant, reconnaitre_accords
+from .accords import SR as SR_HARMONIE
 from .hauteur import SR as SR_VOIX
 from .hauteur import attribuer_voix, suivre_voix
 
 log = logging.getLogger(__name__)
 
 PISTES_HARMONIQUES = ("piano", "guitare", "basse")
-SR_HARMONIE = 22050
-PAS_HARMONIE = 512
-
-NOMS_NOTES = ("Do", "Do♯", "Ré", "Mi♭", "Mi", "Fa", "Fa♯", "Sol", "La♭", "La", "Si♭", "Si")
-# Profils de tonalité de Krumhansl et Kessler (poids de chaque degré dans une tonalité).
-PROFIL_MAJEUR = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
-PROFIL_MINEUR = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
-GAMME_MAJEURE = (0, 2, 4, 5, 7, 9, 11)
-GAMME_MINEURE = (0, 2, 3, 5, 7, 8, 10, 11)  # naturelle, plus la sensible de la mineure harmonique
+DUREE_DISSONANCE_S = 0.45
+"""Durée à partir de laquelle une note hors de l'accord qui frotte s'entend comme une fausse note."""
 
 
 @dataclass(frozen=True)
@@ -64,12 +61,17 @@ class Note:
     debut: float
     fin: float
     hauteur: float
-    """Hauteur chantée en demi-tons (numérotation MIDI), dans l'accordage du groupe."""
+    """Hauteur chantée en demi-tons (numérotation MIDI), dans l'accordage des instruments."""
     visee: int
     """Note juste visée (MIDI)."""
     ecart: float
     """Écart en cents : positif = trop haut, négatif = trop bas."""
-    hors_harmonie: bool = False
+    dissonante: bool = False
+    """Note tenue hors de l'accord, à un demi-ton d'une de ses notes : elle frotte."""
+    accord: str = ""
+    """Nom de l'accord joué pendant la note (vide s'il n'y en a pas)."""
+    degre: str | None = None
+    """Place de la note dans l'accord (« tierce »...), None si elle n'en fait pas partie."""
 
     @property
     def duree(self) -> float:
@@ -80,7 +82,7 @@ class Note:
         return f"{NOMS_NOTES[self.visee % 12]}{self.visee // 12 - 1}"
 
     def categorie(self, tolerance: float, faux: float) -> str:
-        if self.hors_harmonie or abs(self.ecart) > faux:
+        if self.dissonante or abs(self.ecart) > faux:
             return "faux"
         return "approximatif" if abs(self.ecart) > tolerance else "juste"
 
@@ -90,10 +92,11 @@ class AnalyseJustesse:
     duree: float
     notes: list[Note]
     accordage_cents: float
-    """Accordage de référence par rapport à La 440, en cents."""
+    """Accordage général des instruments (ou des voix, a cappella) par rapport à La 440, en cents."""
     reference: str
     """« instruments » ou « voix » (aucun instrument mélodique : la voix sert de référence)."""
-    tonalite: str | None
+    accords: list[Accord] = field(default_factory=list)
+    """Accords joués pendant le morceau."""
     tolerance_cents: float = 20.0
     faux_cents: float = 40.0
     voix: str = "lead"
@@ -126,13 +129,17 @@ class AnalyseJustesse:
     @property
     def ecart_moyen(self) -> float:
         """Tendance générale (cents, pondérée par la durée) : négatif = chante bas."""
-        retenues = [n for n in self.notes if not n.hors_harmonie]
+        retenues = [n for n in self.notes if not n.dissonante]
         total = sum(n.duree for n in retenues)
         return sum(n.ecart * n.duree for n in retenues) / total if total else math.nan
 
     @property
     def fausses(self) -> list[Note]:
         return [n for n in self.notes if self.categorie(n) == "faux"]
+
+    @property
+    def dissonantes(self) -> list[Note]:
+        return [n for n in self.notes if n.dissonante]
 
     def tranches(self, duree_s: float = 8.0, chant_min_s: float = 1.0) -> list[tuple[float, float, float]]:
         """Part juste du chant par tranche de ``duree_s`` secondes : (début, fin, part juste).
@@ -160,7 +167,7 @@ class AnalyseJustesse:
             return "pas de chant détecté" if self.voix == "lead" else "pas d'harmonie détectée"
         return (
             f"{self.part_juste:.0%} du chant juste, tendance {self.ecart_moyen:+.0f} cents, "
-            f"{len(self.fausses)} note(s) fausse(s) dont {sum(n.hors_harmonie for n in self.notes)} hors de l'harmonie"
+            f"{len(self.fausses)} note(s) fausse(s) dont {len(self.dissonantes)} qui frotte(nt) avec l'accord"
         )
 
 
@@ -186,17 +193,6 @@ def _lire_mono(chemins: list[Path], zone: tuple[float, float] | None, sr_cible: 
 def _plages(masque: np.ndarray) -> list[tuple[int, int]]:
     bords = np.diff(np.concatenate([[0], masque.astype(np.int8), [0]]))
     return list(zip(np.flatnonzero(bords == 1).tolist(), np.flatnonzero(bords == -1).tolist()))
-
-
-def tonalite(chroma_moyen: np.ndarray) -> tuple[int, str]:
-    """Tonique (0 = Do) et mode (« majeur » / « mineur ») les plus probables (Krumhansl-Kessler)."""
-    meilleur = (-2.0, 0, "majeur")
-    for tonique in range(12):
-        for mode, profil in (("majeur", PROFIL_MAJEUR), ("mineur", PROFIL_MINEUR)):
-            correlation = float(np.corrcoef(chroma_moyen, np.roll(profil, tonique))[0, 1])
-            if correlation > meilleur[0]:
-                meilleur = (correlation, tonique, mode)
-    return meilleur[1], meilleur[2]
 
 
 def combler_trous(hauteurs: np.ndarray, trames_max: int) -> np.ndarray:
@@ -275,46 +271,62 @@ def _mesurer_notes(contour: np.ndarray, fps: float, params: ParametresJustesse) 
     return mesures
 
 
+def evaluer_note(debut: float, fin: float, centrale: float, accordage: float, accords: list[Accord]) -> Note:
+    """Compare une note chantée (hauteur centrale, en demi-tons par rapport à La 440) à l'accord en cours."""
+    accord = accord_pendant(accords, debut, fin)
+    reference = accord.accordage_cents if accord is not None else accordage
+    hauteur = centrale - reference / 100
+    visee = int(round(hauteur))
+    ecart = 100.0 * (hauteur - visee)
+    if accord is None:
+        return Note(debut, fin, hauteur, visee, ecart)
+    notes_accord = accord.notes
+    if visee % 12 not in notes_accord and abs(ecart) > 35:
+        # Entre deux notes : la note de l'accord est la note visée, chantée très faux.
+        voisine = visee + (1 if ecart > 0 else -1)
+        if voisine % 12 in notes_accord:
+            visee, ecart = voisine, 100.0 * (hauteur - voisine)
+    hors_accord = visee % 12 not in notes_accord
+    frotte = hors_accord and any((visee - n) % 12 in (1, 11) for n in notes_accord)
+    return Note(
+        debut, fin, hauteur, visee, ecart,
+        dissonante=frotte and fin - debut >= DUREE_DISSONANCE_S,
+        accord=accord.nom,
+        degre=accord.degre(visee),
+    )
+
+
 def analyser_justesse(
     pistes: dict[str, Path], params: ParametresJustesse = ParametresJustesse(), zone: tuple[float, float] | None = None
 ) -> JustesseDesVoix:
-    """Analyse la justesse de la voix lead et de la voix d'harmonie par rapport aux instruments."""
+    """Analyse la justesse de la voix lead et de la voix d'harmonie par rapport aux accords joués."""
     import librosa
 
     voix = _lire_mono([pistes["voix"]], zone, SR_VOIX) if "voix" in pistes else np.zeros(0, np.float32)
     duree = voix.size / SR_VOIX
 
-    def analyse(nom: str, notes: list[Note], accordage: float, reference: str, tonalite_: str | None):
+    def analyse(nom: str, notes: list[Note], accordage: float, reference: str, accords: list[Accord]):
         return AnalyseJustesse(
-            duree, notes, accordage, reference, tonalite_, params.tolerance_cents, params.faux_cents, nom
+            duree, notes, accordage, reference, accords, params.tolerance_cents, params.faux_cents, nom
         )
 
     if voix.size < SR_VOIX or not np.any(voix):
         return JustesseDesVoix(
-            analyse("lead", [], 0.0, "instruments", None), analyse("harmonie", [], 0.0, "instruments", None)
+            analyse("lead", [], 0.0, "instruments", []), analyse("harmonie", [], 0.0, "instruments", [])
         )
 
-    # Référence : accordage et harmonie des instruments mélodiques.
+    # Référence : accords joués par les instruments mélodiques, et leur accordage.
     instruments = _lire_mono([pistes[n] for n in PISTES_HARMONIQUES if n in pistes], zone, SR_HARMONIE)
     niveau_voix = float(np.sqrt(np.mean(voix.astype(np.float64) ** 2)))
     niveau_instr = float(np.sqrt(np.mean(instruments.astype(np.float64) ** 2))) if instruments.size else 0.0
     avec_instruments = niveau_instr > max(niveau_voix * 10 ** (-40 / 20), 1e-5)
-    chroma = None
-    nom_tonalite = None
-    gamme: set[int] | None = None
     accordage = 0.0
+    accords: list[Accord] = []
     if avec_instruments:
-        accordage = 100.0 * float(librosa.estimate_tuning(y=instruments, sr=SR_HARMONIE, n_fft=4096))
         with warnings.catch_warnings():
-            # Extrait très court : librosa prévient que ses fenêtres graves dépassent le signal.
             warnings.simplefilter("ignore", UserWarning)
-            chroma = librosa.feature.chroma_cqt(
-                y=instruments, sr=SR_HARMONIE, hop_length=PAS_HARMONIE, tuning=accordage / 100, norm=None
-            )
-        tonique, mode = tonalite(chroma.sum(axis=1))
-        gamme = {(tonique + d) % 12 for d in (GAMME_MAJEURE if mode == "majeur" else GAMME_MINEURE)}
-        nom_tonalite = f"{NOMS_NOTES[tonique]} {mode}"
-        chroma = chroma / np.maximum(chroma.max(axis=0, keepdims=True), 1e-9)
+            accordage = 100.0 * float(librosa.estimate_tuning(y=instruments, sr=SR_HARMONIE, n_fft=4096))
+        accords = reconnaitre_accords(instruments, accordage)
 
     # Hauteur chantée (une ou deux voix), seulement là où la voix est bien présente,
     # répartie entre lead et harmonie, puis découpée en notes mesurées sur leur centre.
@@ -335,31 +347,13 @@ def analyser_justesse(
     reference = "instruments" if avec_instruments else "voix"
     return JustesseDesVoix(
         *(
-            analyse(nom, _evaluer(mesures[nom], accordage, gamme, chroma), accordage, reference, nom_tonalite)
+            analyse(
+                nom,
+                [evaluer_note(d, f, h, accordage, accords) for d, f, h in mesures[nom]],
+                accordage,
+                reference,
+                accords,
+            )
             for nom in ("lead", "harmonie")
         )
     )
-
-
-def _evaluer(
-    mesures: list[tuple[float, float, float]], accordage: float, gamme: set[int] | None, chroma: np.ndarray | None
-) -> list[Note]:
-    """Écart de chaque note à la note juste visée, et fausses notes hors de l'harmonie."""
-    notes: list[Note] = []
-    for debut, fin, centrale in mesures:
-        hauteur = centrale - accordage / 100
-        visee = int(round(hauteur))
-        ecart = 100.0 * (hauteur - visee)
-        # Entre deux notes : la tonalité départage la note visée.
-        if gamme is not None and abs(ecart) > 35 and visee % 12 not in gamme:
-            voisine = visee + (1 if ecart > 0 else -1)
-            if voisine % 12 in gamme:
-                visee, ecart = voisine, 100.0 * (hauteur - voisine)
-        hors_harmonie = False
-        if gamme is not None and chroma is not None and fin - debut >= 0.25 and visee % 12 not in gamme:
-            i0 = int(debut * SR_HARMONIE / PAS_HARMONIE)
-            i1 = max(i0 + 1, int(fin * SR_HARMONIE / PAS_HARMONIE))
-            local = chroma[:, i0:i1].mean(axis=1) if i0 < chroma.shape[1] else np.zeros(12)
-            hors_harmonie = bool(local[visee % 12] < 0.3 * max(float(local.max()), 1e-9))
-        notes.append(Note(debut, fin, hauteur, visee, ecart, hors_harmonie))
-    return notes

@@ -14,6 +14,7 @@ from .graphique_commun import (
     ENCRE,
     ENCRE_DISCRETE,
     ENCRE_SECONDAIRE,
+    GRILLE,
     SURFACE,
     axe_du_temps,
     date_lisible,
@@ -45,6 +46,46 @@ def _couleur_phrase(part: float) -> str:
     return BON if part >= 0.8 else ATTENTION if part >= 0.6 else CRITIQUE
 
 
+LARGEUR_GRAPHIQUE_PX = 1800 * 0.86
+PX_PAR_CARACTERE = 9  # texte en corps 8 à 150 dpi
+
+
+def _largeur_px(duree_s: float, duree_totale: float) -> float:
+    return duree_s / max(duree_totale, 1.0) * LARGEUR_GRAPHIQUE_PX
+
+
+def _dessiner_accords(ax, analyse: AnalyseJustesse) -> None:
+    """Bande des accords joués, au-dessus des notes : chaque note est comparée à l'accord du moment."""
+    from matplotlib.patches import Rectangle
+
+    duree = max(analyse.duree, 1.0)
+    ax.set_xlim(0, duree)
+    ax.set_ylim(0, 1)
+    ax.axis("off")
+    ax.text(-0.006, 0.5, "accords", transform=ax.transAxes, ha="right", va="center",
+            color=ENCRE_DISCRETE, fontsize=8)
+    accords = [a for a in analyse.accords or [] if a.fondamentale is not None]
+    if not accords:
+        ax.text(0.0, 0.5, "aucun accord reconnu : comparaison à l'accordage général",
+                transform=ax.transAxes, ha="left", va="center", color=ENCRE_DISCRETE, fontsize=8)
+        return
+    ecart = 2 * duree / LARGEUR_GRAPHIQUE_PX  # 2 px de fond entre deux accords
+    # Noms sur deux rangées en alternance : chaque nom peut déborder sur la case voisine,
+    # dont le nom est sur l'autre rangée. Un nom est omis s'il chevaucherait le précédent
+    # de sa rangée.
+    fin_rangee = [-1e9, -1e9]
+    for k, accord in enumerate(accords):
+        largeur = accord.fin - accord.debut
+        ax.add_patch(Rectangle((accord.debut, 0.03), max(largeur - ecart, ecart), 0.94, facecolor=GRILLE, lw=0))
+        rangee = k % 2
+        centre_px = _largeur_px((accord.debut + accord.fin) / 2, duree)
+        demi_texte = PX_PAR_CARACTERE * len(accord.nom) / 2 + 3
+        if centre_px - demi_texte >= fin_rangee[rangee]:
+            ax.text((accord.debut + accord.fin) / 2, 0.73 if rangee == 0 else 0.27, accord.nom,
+                    ha="center", va="center", color=ENCRE_SECONDAIRE, fontsize=8)
+            fin_rangee[rangee] = centre_px + demi_texte
+
+
 def tracer(analyse: AnalyseJustesse, chemin: Path, titre: str, date: str | None = None) -> None:
     """Enregistre en JPG la justesse de chaque note et la part juste de chaque tranche de 8 s."""
     import matplotlib
@@ -57,7 +98,8 @@ def tracer(analyse: AnalyseJustesse, chemin: Path, titre: str, date: str | None 
     tol, faux = analyse.tolerance_cents, analyse.faux_cents
     with plt.rc_context({"font.family": "DejaVu Sans", "font.size": 10}):
         fig = plt.figure(figsize=(12, 6.8), dpi=150, facecolor=SURFACE)
-        ax = fig.add_axes((0.07, 0.31, 0.86, 0.45))
+        ax = fig.add_axes((0.07, 0.31, 0.86, 0.41))
+        ax_accords = fig.add_axes((0.07, 0.728, 0.86, 0.052), sharex=ax)
         ax_phrases = fig.add_axes((0.07, 0.08, 0.86, 0.13), sharex=ax)
 
         # En-tête.
@@ -66,23 +108,21 @@ def tracer(analyse: AnalyseJustesse, chemin: Path, titre: str, date: str | None 
         if date_lisible(date):
             contexte.append(f"répétition du {date_lisible(date)}")
         if analyse.reference == "instruments":
-            la = f"{analyse.la_hz:.1f}".replace(".", ",")
-            contexte.append(f"comparée à l'accordage du groupe (La = {la} Hz)")
+            contexte.append("comparée aux accords joués par le groupe à chaque instant")
         else:
             contexte.append("comparée à l'accordage moyen des voix (aucun instrument mélodique)")
         fig.text(0.07, 0.912, "  ·  ".join(contexte), color=ENCRE_SECONDAIRE, fontsize=10, va="center")
 
         if analyse.detecte:
             fausses = analyse.fausses
-            hors = [n for n in analyse.notes if n.hors_harmonie]
+            hors = analyse.dissonantes
+            pluriel = "s" if len(fausses) > 1 else ""
             chiffres = [
                 f"{pourcent(analyse.part_juste)} juste sur {minutes_secondes(analyse.duree_chantee)} de chant",
                 _tendance(analyse.ecart_moyen),
-                f"{len(fausses)} note{'s' if len(fausses) > 1 else ''} fausse{'s' if len(fausses) > 1 else ''}"
-                + (f" dont {len(hors)} hors de l'harmonie" if hors else ""),
+                (f"{len(fausses)} note{pluriel} fausse{pluriel}" if fausses else "aucune note fausse")
+                + (f" dont {len(hors)} qui frotte{'nt' if len(hors) > 1 else ''} avec l'accord" if hors else ""),
             ]
-            if analyse.tonalite:
-                chiffres.append(f"tonalité : {analyse.tonalite}")
             fig.text(0.07, 0.868, "   ·   ".join(chiffres), color=ENCRE, fontsize=11, va="center")
 
             # Zone juste, repères et notes.
@@ -103,13 +143,26 @@ def tracer(analyse: AnalyseJustesse, chemin: Path, titre: str, date: str | None 
                         [(n.debut + n.fin) / 2], [v + (4 if v > 0 else -4)], marker="^" if v > 0 else "v",
                         s=30, color=couleur, edgecolors=SURFACE, linewidths=1, zorder=4,
                     )
-            # Fausses notes hors de l'harmonie : croix et nom de la note (les plus longues).
-            for n in sorted(hors, key=lambda n: n.duree, reverse=True)[:ETIQUETTES_MAX]:
+            # Notes qui frottent avec l'accord : croix, et « note sur accord » pour les plus longues.
+            # Deux étiquettes proches sont décalées en hauteur pour ne pas se chevaucher.
+            etiquetees = sorted(sorted(hors, key=lambda n: n.duree, reverse=True)[:ETIQUETTES_MAX], key=lambda n: n.debut)
+            occupe: list[tuple[float, float, int]] = []  # (début px, fin px, niveau)
+            for n in etiquetees:
                 x, y = (n.debut + n.fin) / 2, float(np.clip(n.ecart, -LIMITE_CENTS + 3, LIMITE_CENTS - 3))
                 ax.scatter([x], [y], marker="x", s=36, color=ENCRE, linewidths=1.5, zorder=5)
+                texte = f"{n.nom.rstrip('0123456789-')} sur {n.accord}"
+                centre = _largeur_px(x, analyse.duree)
+                demi = PX_PAR_CARACTERE * len(texte) / 2 + 4
+                niveau = 0
+                while any(a < centre + demi and centre - demi < b and lv == niveau for a, b, lv in occupe):
+                    niveau += 1
+                occupe.append((centre - demi, centre + demi, niveau))
                 ax.annotate(
-                    n.nom.rstrip("0123456789-"), (x, y), xytext=(0, 9), textcoords="offset points",
-                    ha="center", va="bottom", color=ENCRE_SECONDAIRE, fontsize=8, zorder=6,
+                    texte, (x, y), xytext=(0, 9 + 12 * niveau),
+                    textcoords="offset points", ha="center", va="bottom", color=ENCRE_SECONDAIRE,
+                    fontsize=8, zorder=6,
+                    arrowprops=None if niveau == 0 else {"arrowstyle": "-", "color": ENCRE_DISCRETE, "lw": 0.6,
+                                                       "shrinkA": 0, "shrinkB": 4},
                 )
             for n in hors[ETIQUETTES_MAX:]:
                 ax.scatter([(n.debut + n.fin) / 2], [float(np.clip(n.ecart, -57, 57))], marker="x",
@@ -119,7 +172,7 @@ def tracer(analyse: AnalyseJustesse, chemin: Path, titre: str, date: str | None 
                 Line2D([], [], color=BON, lw=3.5, label=f"Juste (±{tol:g} cents)"),
                 Line2D([], [], color=ATTENTION, lw=3.5, label=f"Approximatif ({tol:g} à {faux:g} cents)"),
                 Line2D([], [], color=CRITIQUE, lw=3.5, label=f"Faux (plus de {faux:g} cents)"),
-                Line2D([], [], color=ENCRE, marker="x", lw=0, markersize=6, label="Note hors de l'harmonie"),
+                Line2D([], [], color=ENCRE, marker="x", lw=0, markersize=6, label="Note qui frotte avec l'accord"),
             ]
             fig.legend(
                 handles=legende, loc="center left", bbox_to_anchor=(0.065, 0.815), ncol=4, frameon=False,
@@ -143,6 +196,8 @@ def tracer(analyse: AnalyseJustesse, chemin: Path, titre: str, date: str | None 
                 0.5, 0.5, "Aucune note chantée assez longue pour mesurer la justesse",
                 transform=ax.transAxes, ha="center", va="center", color=ENCRE_SECONDAIRE, fontsize=11,
             )
+
+        _dessiner_accords(ax_accords, analyse)
 
         # Panneau principal : écart en cents.
         axe_du_temps(ax, analyse.duree)
