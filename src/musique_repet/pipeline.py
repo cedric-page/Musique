@@ -1,4 +1,5 @@
-"""Enchaînement complet : découpe -> séparation -> équilibrage -> volumes -> MP3."""
+"""Enchaînement complet : découpe -> séparation -> anti-écho -> équilibrage -> volumes -> MP3,
+puis analyse du tempo (graphique JPG)."""
 
 from __future__ import annotations
 
@@ -13,8 +14,10 @@ from pathlib import Path
 from . import audio_io
 from .decoupe import Morceau, lire_csv, nom_fichier_sur
 from .echo import ParametresAntiEcho, attenuer_echo_avec_cache
+from .graphique_tempo import tracer
 from .mixage import ParametresMixage, ReglagePiste, mixer
 from .separation import Separateur, separer_avec_cache
+from .tempo import ParametresTempo, analyser_pistes
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +30,9 @@ class Tache:
     wav: Path
     dossier_pistes: Path
     mp3: Path
+    titre: str = ""
+    date: str = ""
+    """Date de l'enregistrement d'origine, AAAAMMJJ."""
 
 
 @dataclass
@@ -39,6 +45,8 @@ class Options:
     debit_kbps: int = 192
     forcer_separation: bool = False
     anti_echo: ParametresAntiEcho = field(default_factory=ParametresAntiEcho)
+    tempo: ParametresTempo | None = field(default_factory=ParametresTempo)
+    """Réglages de l'analyse du tempo ; ``None`` pour ne pas produire de graphique."""
 
 
 def _cles_sources(fichiers: list[Path]) -> dict[Path, str]:
@@ -92,7 +100,12 @@ def preparer_taches(source: Path, cle: str, options: Options) -> list[Tache]:
             audio, sr = audio_io.lire(lisible)
             audio_io.ecrire_wav(wav, audio, sr)
         log.info("%s : pas de CSV, traitement de l'enregistrement complet", source.name)
-        return [Tache(source.name, wav, options.travail / "pistes" / cle, options.sortie / f"{date}-{cle}.mp3")]
+        return [
+            Tache(
+                source.name, wav, options.travail / "pistes" / cle, options.sortie / f"{date}-{cle}.mp3",
+                titre=source.stem, date=date,
+            )
+        ]
 
     morceaux: list[Morceau] = lire_csv(csv, duree=audio_io.duree(lisible))
     if not morceaux:
@@ -116,6 +129,8 @@ def preparer_taches(source: Path, cle: str, options: Options) -> list[Tache]:
                 wav,
                 options.travail / "pistes" / cle / nom,
                 options.sortie / f"{date}-{nom}.mp3",
+                titre=morceau.titre,
+                date=date,
             )
         )
     return taches
@@ -141,6 +156,12 @@ def traiter_tache(tache: Tache, separateur: Separateur, options: Options) -> Non
     _journaliser_reglages(reglages)
     audio_io.ecrire_mp3(tache.mp3, mix, sr, options.debit_kbps)
     log.info("  ✔ %s", tache.mp3)
+    if options.tempo is not None:
+        analyse = analyser_pistes(pistes, options.tempo)
+        log.info("  Tempo : %s", analyse.resume())
+        graphique = tache.mp3.with_suffix(".jpg")
+        tracer(analyse, graphique, tache.titre or tache.mp3.stem, tache.date or None)
+        log.info("  ✔ %s", graphique)
 
 
 def executer(options: Options, separateur: Separateur) -> int:

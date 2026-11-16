@@ -14,6 +14,7 @@ from .effets import CHORUS_BASSE, ParametresChorus
 from .mixage import ParametresMixage
 from .pipeline import Options, executer
 from .separation import MODELE_PAR_DEFAUT, SeparateurDemucs
+from .tempo import ParametresTempo
 
 
 def construire_parseur() -> argparse.ArgumentParser:
@@ -86,6 +87,22 @@ def construire_parseur() -> argparse.ArgumentParser:
             f"0 pour le désactiver (défaut : {CHORUS_BASSE.melange})"
         ),
     )
+    p.add_argument("--sans-tempo", action="store_true", help="ne produit pas le graphique du tempo (JPG)")
+    p.add_argument(
+        "--bpm-min",
+        type=float,
+        default=ParametresTempo.bpm_min,
+        help=f"tempo minimal recherché (défaut : {ParametresTempo.bpm_min:g})",
+    )
+    p.add_argument(
+        "--bpm-max",
+        type=float,
+        default=ParametresTempo.bpm_max,
+        help=(
+            f"tempo maximal recherché (défaut : {ParametresTempo.bpm_max:g}). Le baisser si une ballade "
+            "est mesurée au double de son tempo"
+        ),
+    )
     p.add_argument("-v", "--verbeux", action="store_true", help="affiche plus de détails")
     return p
 
@@ -113,6 +130,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.rt60 <= 0:
         parseur.error("--rt60 doit être positif")
+    if not 30 <= args.bpm_min < args.bpm_max <= 400:
+        parseur.error("il faut 30 <= --bpm-min < --bpm-max <= 400")
     try:
         facteurs = charger_config(args.config)
     except (OSError, ValueError) as exc:
@@ -138,6 +157,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
         debit_kbps=args.debit,
         anti_echo=ParametresAntiEcho(rt60=args.rt60, attenuation_max_db=args.anti_echo),
+        tempo=None if args.sans_tempo else ParametresTempo(bpm_min=args.bpm_min, bpm_max=args.bpm_max),
         forcer_separation=args.forcer_separation,
     )
     separateur = SeparateurDemucs(args.modele, appareil=args.appareil, shifts=args.shifts)

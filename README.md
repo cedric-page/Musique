@@ -9,6 +9,7 @@ Traitement d'enregistrements de répétition (2 chanteuses, piano, batterie acou
 5. **Volumes personnalisés** : un facteur par instrument, lu dans un fichier JSON, est appliqué.
 6. **Chorus léger sur les voix et la basse**, pour épaissir et élargir un peu le son. Sur la basse, seules les fréquences au-dessus de 250 Hz reçoivent le chorus : les graves restent nets et centrés.
 7. **Mixage** de toutes les pistes, normalisé à -14 LUFS (crête max. -1 dBFS), puis export en **MP3** nommé `AAAAMMJJ-titre.mp3`.
+8. **Analyse du tempo** : un graphique `AAAAMMJJ-titre.jpg` montre les variations de BPM au cours du morceau (voir plus bas).
 
 > Les deux chanteuses sont dans la même piste `voix` : Demucs sépare les instruments, pas les voix entre elles.
 
@@ -74,8 +75,11 @@ Chaque MP3 est nommé `AAAAMMJJ-titre.mp3` :
 ```
 sortie/
 ├── 20260312-Hallelujah.mp3   # repet_12_mars.mp3 + CSV : un MP3 par morceau
+├── 20260312-Hallelujah.jpg   # … et le graphique de son tempo
 ├── 20260312-Le Sud.mp3
+├── 20260312-Le Sud.jpg
 ├── 20260315-jam_libre.mp3    # jam_libre.wav sans CSV : un seul MP3
+├── 20260315-jam_libre.jpg
 └── _travail/                 # fichiers intermédiaires (réutilisés à la relance)
     ├── decoupes/             # morceaux découpés en .wav
     └── pistes/               # pistes séparées, une par instrument
@@ -97,6 +101,23 @@ Deux réglages :
 
 Changer ces réglages ne refait pas la séparation, seulement l'atténuation (quelques secondes par piste).
 
+### Analyse du tempo
+
+Pour chaque morceau, un graphique JPG du même nom que le MP3 montre comment le tempo a évolué : est-ce que le groupe presse dans les refrains, ralentit dans les passages calmes, finit plus vite qu'il n'a commencé ?
+
+![Exemple de graphique du tempo](docs/exemple-tempo.jpg)
+
+*Exemple obtenu sur une batterie synthétique : le groupe presse jusqu'à 120 BPM vers 1:30, s'arrête pendant un break (courbe interrompue), puis ralentit sur la fin.*
+
+- **Trait épais** : tempo moyen sur 8 temps (deux mesures à 4 temps), la courbe à lire.
+- **Trait fin** : tempo mesuré entre chaque temps et le suivant ; ses zigzags montrent la précision rythmique.
+- **Bande bleutée** : ±3 % autour du tempo médian. Hors de la bande, l'écart s'entend.
+- **En-tête** : tempo médian, plage, part du morceau joué dans la bande, et tempo du début et de la fin.
+
+Le tempo est mesuré sur la batterie, la basse, la guitare et le piano séparés (pas sur les voix, souvent plus libres), après atténuation de l'écho. Les passages sans pulsation régulière (silence, break, intro jouée librement) ne sont pas tracés plutôt que d'afficher un tempo inventé.
+
+Si une ballade est mesurée au double de son vrai tempo (par exemple 144 au lieu de 72, à cause d'un charleston en croches), baisse le tempo maximal recherché : `--bpm-max 120`. À l'inverse, pour un morceau très rapide lu à moitié, monte `--bpm-min`.
+
 ### Options utiles
 
 | Option | Rôle |
@@ -110,6 +131,8 @@ Changer ces réglages ne refait pas la séparation, seulement l'atténuation (qu
 | `--rt60 0.4` | durée de réverbération de la salle en secondes |
 | `--chorus 0.3` | dosage du chorus sur les voix (`0` = désactivé, `0.5` = plus marqué) |
 | `--chorus-basse 0.4` | dosage du chorus sur la basse, au-dessus de 250 Hz (`0` = désactivé) |
+| `--sans-tempo` | ne produit pas le graphique du tempo |
+| `--bpm-min 50` / `--bpm-max 200` | plage de tempos recherchée par l'analyse |
 | `--debit 256` | débit MP3 en kb/s |
 | `--gain-max-db 12` | correction maximale de l'équilibrage, pour ne pas trop amplifier un instrument qui joue peu |
 | `--exclure-equilibrage autre` | pistes laissées à leur niveau d'origine par l'équilibrage (défaut : `autre`, qui contient surtout des résidus de séparation) |
