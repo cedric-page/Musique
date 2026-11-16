@@ -114,7 +114,9 @@ def construire_parseur() -> argparse.ArgumentParser:
     )
     p.add_argument("--sans-tempo", action="store_true", help="ne produit pas le graphique du tempo (JPG)")
     p.add_argument(
-        "--sans-justesse", action="store_true", help="ne produit pas le graphique de la justesse du chant (JPG)"
+        "--sans-justesse",
+        action="store_true",
+        help="ne produit pas les graphiques de justesse du chant (lead et harmonie)",
     )
     p.add_argument(
         "--tolerance-cents",

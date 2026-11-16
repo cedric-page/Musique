@@ -10,7 +10,7 @@ Traitement d'enregistrements de répétition (2 chanteuses, piano, batterie acou
 6. **Chorus léger sur les voix et la basse**, pour épaissir et élargir un peu le son. Sur la basse, seules les fréquences au-dessus de 250 Hz reçoivent le chorus : les graves restent nets et centrés.
 7. **Mixage** de toutes les pistes, normalisé à -14 LUFS (crête max. -1 dBFS), puis export en **MP3** nommé `AAAAMMJJ-titre.mp3`.
 8. **Analyse du tempo** : un graphique `AAAAMMJJ-titre-tempo.jpg` montre les variations de BPM au cours du morceau (voir plus bas).
-9. **Justesse du chant** : un graphique `AAAAMMJJ-titre-justesse.jpg` montre, note par note, si la voix est juste par rapport aux instruments, et où sont les fausses notes (voir plus bas).
+9. **Justesse du chant**, en deux analyses : `AAAAMMJJ-titre-justesse-lead.jpg` pour la voix lead et `AAAAMMJJ-titre-justesse-harmonie.jpg` pour la voix d'harmonie (quand il y en a une) montrent, note par note, si chaque voix est juste par rapport aux instruments, et où sont les fausses notes (voir plus bas).
 
 > Les deux chanteuses sont dans la même piste `voix` : Demucs sépare les instruments, pas les voix entre elles.
 
@@ -109,10 +109,11 @@ Chaque MP3 est nommé `AAAAMMJJ-titre.mp3` :
 sortie/
 ├── 20260312-Hallelujah.mp3            # repet_12_mars.mp3 + CSV : un MP3 par morceau
 ├── 20260312-Hallelujah-tempo.jpg      # … le graphique de son tempo
-├── 20260312-Hallelujah-justesse.jpg   # … et celui de la justesse du chant
+├── 20260312-Hallelujah-justesse-lead.jpg       # … la justesse de la voix lead
+├── 20260312-Hallelujah-justesse-harmonie.jpg   # … et celle de l'harmonie, s'il y en a une
 ├── 20260312-Le Sud.mp3
 ├── 20260312-Le Sud-tempo.jpg
-├── 20260312-Le Sud-justesse.jpg
+├── 20260312-Le Sud-justesse-lead.jpg
 ├── 20260315-Let it be.mp3             # repet_15_mars.wav sans CSV : la chanson seule, titre reconnu
 ├── …
 └── _travail/                 # fichiers intermédiaires (réutilisés à la relance)
@@ -155,11 +156,16 @@ Si une ballade est mesurée au double de son vrai tempo (par exemple 144 au lieu
 
 ### Justesse du chant
 
-Pour chaque morceau, le graphique `…-justesse.jpg` montre si la voix est juste **par rapport à la musique**, et à quels moments elle ne l'est pas.
+Pour chaque morceau, deux analyses montrent si chaque voix est juste **par rapport à la musique**, et à quels moments elle ne l'est pas :
 
-![Exemple de graphique de la justesse](docs/exemple-justesse.jpg)
+- `…-justesse-lead.jpg` : la **voix lead**, celle qui porte la mélodie ;
+- `…-justesse-harmonie.jpg` : la **voix d'harmonie**, la seconde voix qui chante en même temps (tierce, sixte...) ; ce graphique n'est produit que si une harmonie est détectée.
 
-*Exemple obtenu sur un chant synthétique : couplets justes, refrain qui baisse progressivement (0:32-0:50), passage approximatif vers 1:20, et trois fausses notes hors de l'harmonie (croix).*
+![Exemple : justesse de la voix lead](docs/exemple-justesse-lead.jpg)
+
+![Exemple : justesse de l'harmonie](docs/exemple-justesse-harmonie.jpg)
+
+*Exemple obtenu sur un chant synthétique : le lead est juste, sauf une baisse au milieu du premier refrain (0:40-0:48) et deux fausses notes hors de l'harmonie (croix) ; l'harmonie, à la tierce au-dessus, est juste dans le premier refrain mais chante environ 30 cents trop bas dans le second (1:20-1:40).*
 
 **Panneau du haut, note par note** : chaque trait est une note chantée, à sa hauteur d'écart avec la note juste, en **cents** (100 cents = un demi-ton). Au-dessus de 0, la note est trop haute ; en dessous, trop basse.
 
@@ -170,17 +176,24 @@ Pour chaque morceau, le graphique `…-justesse.jpg` montre si la voix est juste
 
 **Panneau du bas, toutes les 8 secondes** : la part du chant juste, pour repérer d'un coup d'œil les passages à retravailler.
 
-**En-tête** : part du chant juste, tendance générale (« un peu bas » si les chanteuses ont tendance à chanter sous la note), nombre de fausses notes et tonalité détectée.
+**En-tête** : part du chant juste et durée chantée par cette voix, tendance générale (« un peu bas » si la chanteuse a tendance à chanter sous la note), nombre de fausses notes et tonalité détectée.
 
 Comment c'est mesuré :
 
 - la référence est **l'accordage réel du groupe**, mesuré sur le piano, la guitare et la basse (affiché dans le sous-titre, par exemple « La = 436,2 Hz ») : si les instruments sont accordés un peu bas, les chanteuses doivent chanter un peu bas avec eux. Sans instrument mélodique (a cappella), la référence est l'accordage moyen des voix ;
 - la hauteur est suivie sur la piste voix séparée, **pour une voix seule ou deux voix qui chantent ensemble** (harmonies en tierce, sixte...) : chacune est mesurée séparément ;
+- les voix sont ensuite réparties entre **lead** et **harmonie** :
+  - une voix qui chante seule est le lead (c'est elle qui porte la mélodie) ;
+  - quand deux voix chantent ensemble, chacune est suivie note après note, et le lead est celle qui chante le plus fort sur le passage ; à force égale, c'est la voix la plus proche, en hauteur, de celle qui chante seule dans le reste du morceau (les couplets) ;
+  - une note d'harmonie tenue après que le lead s'est arrêté, ou commencée juste avant lui, reste à l'harmonie ;
 - chaque note est mesurée sur son centre : l'attaque glissée et le vibrato ne comptent pas comme des erreurs ; les notes de moins de 0,15 s (ornements, passages) ne sont pas évaluées.
 
 Les seuils se règlent : `--tolerance-cents 25` est plus indulgent, `--tolerance-cents 15 --faux-cents 30` plus exigeant.
 
-> Limites : deux voix à l'unisson sont mesurées comme une seule (leur moyenne). Une « blue note » volontaire (tierce mineure sur un accord majeur, par exemple) peut être marquée hors de l'harmonie : les croix sont des notes **à vérifier à l'écoute**.
+> Limites :
+> - deux voix à l'unisson sont mesurées comme une seule (leur moyenne), comptée au lead ;
+> - si les deux chanteuses chantent ensemble du début à la fin, au même volume et sans passage seul, rien ne permet de savoir laquelle porte la mélodie : les deux analyses restent justes, mais les étiquettes « lead » et « harmonie » peuvent être inversées ;
+> - une « blue note » volontaire (tierce mineure sur un accord majeur, par exemple) peut être marquée hors de l'harmonie : les croix sont des notes **à vérifier à l'écoute**.
 
 ### Options utiles
 
@@ -200,7 +213,7 @@ Les seuils se règlent : `--tolerance-cents 25` est plus indulgent, `--tolerance
 | `--repertoire FICHIER` | liste des titres du groupe (défaut : `repertoire.txt` du dossier d'entrée) |
 | `--modele-paroles medium` | modèle Whisper pour les paroles : `tiny`, `base`, `small` (défaut), `medium`, `large-v3` |
 | `--sans-tempo` | ne produit pas le graphique du tempo |
-| `--sans-justesse` | ne produit pas le graphique de la justesse du chant |
+| `--sans-justesse` | ne produit pas les graphiques de justesse (lead et harmonie) |
 | `--tolerance-cents 20` / `--faux-cents 40` | seuils « juste » et « faux » de la justesse (100 cents = un demi-ton) |
 | `--bpm-min 50` / `--bpm-max 200` | plage de tempos recherchée par l'analyse |
 | `--debit 256` | débit MP3 en kb/s |

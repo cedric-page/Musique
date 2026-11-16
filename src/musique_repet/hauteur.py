@@ -11,6 +11,9 @@
 
 Seuls les instants où la voix est bien présente (moins de 25 dB sous les
 passages forts) et nettement harmonique (pas du bruit) sont gardés.
+
+Les deux voix sont ensuite attribuées au **lead** et à l'**harmonie** (voir
+``attribuer_voix``).
 """
 
 from __future__ import annotations
@@ -37,10 +40,13 @@ class Contours:
     """Hauteurs (demi-tons, numérotation MIDI ; NaN = pas de voix) à chaque instant."""
 
     temps: np.ndarray
-    haute: np.ndarray
-    """Voix seule, ou la plus aiguë des deux."""
-    basse: np.ndarray
-    """La plus grave des deux, quand deux voix chantent ensemble."""
+    principale: np.ndarray
+    """Voix seule, ou la plus présente des deux."""
+    seconde: np.ndarray
+    """L'autre voix, quand deux voix chantent ensemble."""
+    energie_principale: np.ndarray | None = None
+    """Énergie de chaque voix (somme des carrés de ses harmoniques) : sert à savoir qui chante le plus fort."""
+    energie_seconde: np.ndarray | None = None
 
     @property
     def fps(self) -> float:
@@ -85,9 +91,10 @@ def _effacer_harmoniques(spectre_c: np.ndarray, f0: np.ndarray) -> np.ndarray:
     return residu
 
 
-def _affiner(spectre: np.ndarray, f0: np.ndarray, autre: np.ndarray) -> np.ndarray:
+def _affiner(spectre: np.ndarray, f0: np.ndarray, autre: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Hauteur précise d'après la position (interpolée) de chaque harmonique ; les harmoniques
-    qui tombent à moins de 3 % d'une harmonique de ``autre`` (seconde voix, NaN sinon) sont écartées."""
+    qui tombent à moins de 3 % d'une harmonique de ``autre`` (seconde voix, NaN sinon) sont écartées.
+    Renvoie aussi l'énergie de la voix (somme des carrés de ses harmoniques retenues)."""
     nb = f0.size
     lignes = np.arange(nb)
     estimations = np.full((nb, NB_HARMONIQUES), np.nan)
@@ -115,7 +122,8 @@ def _affiner(spectre: np.ndarray, f0: np.ndarray, autre: np.ndarray) -> np.ndarr
     proches = np.isfinite(estimations) & (np.abs(1200 * np.log2(estimations / mediane[:, None])) < 15)
     somme = (np.where(proches, poids, 0)).sum(axis=1)
     moyenne = np.where(proches, estimations * poids, 0).sum(axis=1) / np.maximum(somme, 1e-12)
-    return np.where(somme > 0, moyenne, f0)
+    energie = (np.where(np.isfinite(estimations), poids, 0) ** 2).sum(axis=1)
+    return np.where(somme > 0, moyenne, f0), energie
 
 
 def suivre_voix(mono: np.ndarray, fmin: float = 110.0, fmax: float = 1100.0) -> Contours:
@@ -125,10 +133,8 @@ def suivre_voix(mono: np.ndarray, fmin: float = 110.0, fmax: float = 1100.0) -> 
     spectre = _spectre(mono)
     nb = spectre.shape[0]
     temps = np.arange(nb) * PAS / SR
-    haute = np.full(nb, np.nan)
-    basse = np.full(nb, np.nan)
     if nb == 0:
-        return Contours(temps, haute, basse)
+        return Contours(temps, np.zeros(0), np.zeros(0))
     spectre_c = np.sqrt(spectre)  # compression : les harmoniques faibles comptent aussi
     candidats, cases, poids = _grille(fmin, fmax)
 
@@ -156,17 +162,139 @@ def suivre_voix(mono: np.ndarray, fmin: float = 110.0, fmax: float = 1100.0) -> 
         f1[bloc] = np.where(voisee, premiere, np.nan)
         f2[bloc] = np.where(deux_voix, seconde, np.nan)
 
+    energie1 = np.zeros(nb)
+    energie2 = np.zeros(nb)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)  # trames sans harmonique utilisable
         avec_voix = np.isfinite(f1)
-        precis1 = _affiner(spectre[avec_voix], f1[avec_voix], f2[avec_voix])
+        precis1, energie1[avec_voix] = _affiner(spectre[avec_voix], f1[avec_voix], f2[avec_voix])
         avec_deux = np.isfinite(f2)
-        precis2 = _affiner(spectre[avec_deux], f2[avec_deux], f1[avec_deux])
+        precis2, energie2[avec_deux] = _affiner(spectre[avec_deux], f2[avec_deux], f1[avec_deux])
     f1[avec_voix], f2[avec_deux] = precis1, precis2
 
-    midi1 = 69 + 12 * np.log2(f1 / 440.0)
-    midi2 = 69 + 12 * np.log2(f2 / 440.0)
-    deux = np.isfinite(midi2)
-    haute = np.where(deux, np.fmax(midi1, midi2), midi1)
-    basse = np.where(deux, np.fmin(midi1, midi2), np.nan)
-    return Contours(temps, haute, basse)
+    return Contours(
+        temps, 69 + 12 * np.log2(f1 / 440.0), 69 + 12 * np.log2(f2 / 440.0), energie1, energie2
+    )
+
+
+# --- Lead et harmonie ------------------------------------------------------------
+
+
+def _plages(masque: np.ndarray) -> list[tuple[int, int]]:
+    bords = np.diff(np.concatenate([[0], masque.astype(np.int8), [0]]))
+    return list(zip(np.flatnonzero(bords == 1).tolist(), np.flatnonzero(bords == -1).tolist()))
+
+
+def _fermer(masque: np.ndarray, trames: int) -> np.ndarray:
+    """Comble les trous d'au plus ``trames`` trames entre deux zones vraies."""
+    resultat = masque.copy()
+    vrais = np.flatnonzero(masque)
+    for a, b in zip(vrais[:-1], vrais[1:]):
+        if 1 < b - a <= trames + 1:
+            resultat[a + 1 : b] = True
+    return resultat
+
+
+def _cout(valeur: float, precedente: float, age_s: float) -> float:
+    """Coût de rattacher ``valeur`` à une piste : carré de l'écart à sa dernière hauteur,
+    pondéré par la fraîcheur de celle-ci (une note tenue à l'instant pèse bien plus qu'une
+    note d'il y a 200 ms, après laquelle la voix peut repartir n'importe où)."""
+    if np.isnan(precedente):
+        return 0.0
+    return (valeur - precedente) ** 2 * max(np.exp(-age_s / 0.1), 0.05)
+
+
+def attribuer_voix(
+    contours: Contours, pause_s: float = 0.3, meme_note: float = 0.5, duo_min_s: float = 0.25
+) -> tuple[np.ndarray, np.ndarray]:
+    """Répartit les hauteurs entre la voix **lead** et la voix d'**harmonie**.
+
+    - Une voix qui chante seule est le lead (c'est elle qui porte la mélodie).
+    - Dans un passage à deux voix (pauses de moins de ``pause_s`` comprises), les
+      deux voix sont suivies par continuité de hauteur (le carré des écarts
+      favorise les mouvements parallèles, fréquents en harmonie), puis la voix
+      qui chante le plus fort sur l'ensemble du passage est le lead. À force
+      égale (moins de 60/40), c'est la voix la plus proche, en hauteur, de celle
+      qui chante seule dans le reste du morceau.
+    - Une note de l'harmonie tenue juste après le passage (le lead s'est arrêté)
+      ou commencée juste avant (elle entre avant le lead) reste à l'harmonie.
+    - Un passage où l'on n'entend deux voix que moins de ``duo_min_s`` secondes en
+      tout (attaque d'une note, résonance) n'est pas une harmonie : la voix seule
+      y reste au lead.
+
+    Renvoie (lead, harmonie), en demi-tons, NaN quand la voix ne chante pas.
+    """
+    p, q = contours.principale, contours.seconde
+    n = p.size
+    ep = contours.energie_principale if contours.energie_principale is not None else np.ones(n)
+    eq = contours.energie_seconde if contours.energie_seconde is not None else np.zeros(n)
+    pas_s = 1.0 / contours.fps
+    lead = np.full(n, np.nan)
+    harmonie = np.full(n, np.nan)
+    duo = np.isfinite(p) & np.isfinite(q)
+    passages = [
+        (a, b)
+        for a, b in _plages(_fermer(duo, int(round(pause_s * contours.fps))))
+        if duo[a:b].sum() >= duo_min_s * contours.fps
+    ]
+    dans_passage = np.zeros(n, bool)
+    for a, b in passages:
+        dans_passage[a:b] = True
+    seule = ~dans_passage & np.isfinite(p)
+    registre_solo = float(np.median(p[seule])) if seule.any() else np.nan
+
+    for a, b in passages:
+        x = np.full(b - a, np.nan)
+        y = np.full(b - a, np.nan)
+        dernier_x = dernier_y = np.nan
+        age_x = age_y = 0.0
+        energie_x = energie_y = 0.0
+        for k, i in enumerate(range(a, b)):
+            age_x += pas_s
+            age_y += pas_s
+            if np.isfinite(p[i]) and np.isfinite(q[i]):
+                garde = _cout(p[i], dernier_x, age_x) + _cout(q[i], dernier_y, age_y)
+                echange = _cout(q[i], dernier_x, age_x) + _cout(p[i], dernier_y, age_y)
+                if echange < garde:
+                    x[k], y[k] = q[i], p[i]
+                    energie_x, energie_y = energie_x + eq[i], energie_y + ep[i]
+                else:
+                    x[k], y[k] = p[i], q[i]
+                    energie_x, energie_y = energie_x + ep[i], energie_y + eq[i]
+                dernier_x, dernier_y, age_x, age_y = x[k], y[k], 0.0, 0.0
+            elif np.isfinite(p[i]):  # une seule voix entendue : rattachée à la piste la plus proche
+                if np.isnan(dernier_y) or _cout(p[i], dernier_x, age_x) <= _cout(p[i], dernier_y, age_y):
+                    x[k], dernier_x, age_x = p[i], p[i], 0.0
+                else:
+                    y[k], dernier_y, age_y = p[i], p[i], 0.0
+        part_x = energie_x / max(energie_x + energie_y, 1e-12)
+        if 0.4 <= part_x <= 0.6 and np.isfinite(registre_solo) and np.isfinite(x).any() and np.isfinite(y).any():
+            # Force égale : le lead est la voix dont la hauteur rappelle celle qui chante seule.
+            x_est_lead = abs(np.nanmedian(x) - registre_solo) <= abs(np.nanmedian(y) - registre_solo)
+        else:
+            x_est_lead = part_x >= 0.5
+        if x_est_lead:
+            lead[a:b], harmonie[a:b] = x, y
+        else:
+            lead[a:b], harmonie[a:b] = y, x
+
+    lead[seule] = p[seule]
+
+    for a, b in passages:
+        for sens in (1, -1):  # après puis avant le passage
+            zone = range(b, n) if sens == 1 else range(a - 1, -1, -1)
+            bord = range(b - 1, a - 1, -1) if sens == 1 else range(a, b)
+            dernier_h = next((harmonie[i] for i in bord if np.isfinite(harmonie[i])), np.nan)
+            dernier_l = next((lead[i] for i in bord if np.isfinite(lead[i])), np.nan)
+            if np.isnan(dernier_h):
+                continue
+            for j in zone:
+                if dans_passage[j] or np.isnan(lead[j]):
+                    break
+                v = lead[j]
+                plus_proche_de_l_harmonie = np.isnan(dernier_l) or abs(v - dernier_l) > abs(v - dernier_h) + 0.2
+                if abs(v - dernier_h) >= meme_note or not plus_proche_de_l_harmonie:
+                    break
+                harmonie[j], lead[j] = v, np.nan
+                dernier_h = v
+    return lead, harmonie

@@ -225,11 +225,14 @@ def traiter_tache(
         tracer_tempo(analyse, graphique, titre, tache.date or None)
         log.info("  ✔ %s", graphique)
     if options.justesse is not None:
-        justesse = analyser_justesse(pistes, options.justesse, zone)
-        log.info("  Justesse : %s", justesse.resume())
-        graphique = tache.mp3.with_name(f"{tache.mp3.stem}-justesse.jpg")
-        tracer_justesse(justesse, graphique, titre, tache.date or None)
-        log.info("  ✔ %s", graphique)
+        voix = analyser_justesse(pistes, options.justesse, zone)
+        for analyse in (voix.lead, voix.harmonie):
+            log.info("  Justesse (%s) : %s", analyse.voix, analyse.resume())
+            if analyse.voix == "harmonie" and not analyse.detecte:
+                continue  # pas de seconde voix : pas de graphique
+            graphique = tache.mp3.with_name(f"{tache.mp3.stem}-justesse-{analyse.voix}.jpg")
+            tracer_justesse(analyse, graphique, titre, tache.date or None)
+            log.info("  ✔ %s", graphique)
 
 
 def executer(options: Options, separateur: Separateur, transcripteur: Transcripteur | None = None) -> int:

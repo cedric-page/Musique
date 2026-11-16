@@ -1,4 +1,4 @@
-"""Graphique JPG de la justesse du chant, note par note et toutes les 8 secondes."""
+"""Graphique JPG de la justesse d'une voix (lead ou harmonie), note par note et toutes les 8 secondes."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from .graphique_commun import (
     axe_du_temps,
     date_lisible,
     enregistrer_jpg,
+    minutes_secondes,
     pourcent,
 )
 from .justesse import AnalyseJustesse
@@ -61,7 +62,7 @@ def tracer(analyse: AnalyseJustesse, chemin: Path, titre: str, date: str | None 
 
         # En-tête.
         fig.text(0.07, 0.955, titre, color=ENCRE, fontsize=16, fontweight="bold", va="center")
-        contexte = ["Justesse du chant"]
+        contexte = ["Justesse de la voix lead" if analyse.voix == "lead" else "Justesse de l'harmonie (seconde voix)"]
         if date_lisible(date):
             contexte.append(f"répétition du {date_lisible(date)}")
         if analyse.reference == "instruments":
@@ -75,7 +76,7 @@ def tracer(analyse: AnalyseJustesse, chemin: Path, titre: str, date: str | None 
             fausses = analyse.fausses
             hors = [n for n in analyse.notes if n.hors_harmonie]
             chiffres = [
-                f"{pourcent(analyse.part_juste)} du chant juste",
+                f"{pourcent(analyse.part_juste)} juste sur {minutes_secondes(analyse.duree_chantee)} de chant",
                 _tendance(analyse.ecart_moyen),
                 f"{len(fausses)} note{'s' if len(fausses) > 1 else ''} fausse{'s' if len(fausses) > 1 else ''}"
                 + (f" dont {len(hors)} hors de l'harmonie" if hors else ""),
@@ -128,11 +129,16 @@ def tracer(analyse: AnalyseJustesse, chemin: Path, titre: str, date: str | None 
             # Part juste de chaque tranche de 8 s.
             for debut, fin, part in analyse.tranches():
                 largeur = max(fin - debut - 0.4, 0.2)
+                # Hauteur minimale : une tranche chantée à 0 % de justesse reste visible (en rouge),
+                # pour ne pas la confondre avec une tranche où l'on ne chante pas.
                 ax_phrases.bar(
-                    debut, part * 100, width=largeur, align="edge", color=_couleur_phrase(part), lw=0, zorder=3
+                    debut, max(part * 100, 3), width=largeur, align="edge", color=_couleur_phrase(part), lw=0, zorder=3
                 )
         else:
-            fig.text(0.07, 0.868, "Pas de chant détecté", color=ENCRE, fontsize=11, va="center")
+            fig.text(
+                0.07, 0.868, "Pas de chant détecté" if analyse.voix == "lead" else "Pas d'harmonie détectée",
+                color=ENCRE, fontsize=11, va="center",
+            )
             ax.text(
                 0.5, 0.5, "Aucune note chantée assez longue pour mesurer la justesse",
                 transform=ax.transAxes, ha="center", va="center", color=ENCRE_SECONDAIRE, fontsize=11,

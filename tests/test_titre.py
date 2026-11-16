@@ -232,7 +232,7 @@ def test_sans_csv_chanson_coupee_et_titre_reconnu(tmp_path, scenario, monkeypatc
 
     mp3 = sortie / "20260312-Hallelujah.mp3"
     assert mp3.exists() and (sortie / "20260312-Hallelujah-tempo.jpg").exists()
-    assert (sortie / "20260312-Hallelujah-justesse.jpg").exists()
+    assert (sortie / "20260312-Hallelujah-justesse-lead.jpg").exists()
     duree = sf.info(mp3).duration
     assert 72 <= duree <= 80  # 120 s d'enregistrement, ~76 s de chanson
     # Seule la chanson a été transcrite (pas de répertoire : rien à chercher avant).

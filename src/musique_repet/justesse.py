@@ -5,8 +5,9 @@
    théorique : un groupe accordé à La = 437 Hz n'a pas tort, et les
    chanteuses doivent chanter avec lui.
 2. **Hauteur chantée** : suivie sur la piste voix séparée, pour une voix seule
-   ou deux voix ensemble (harmonies, voir ``hauteur.py``), puis découpée en
-   notes. Chaque note est mesurée sur son centre : l'attaque glissée et le
+   ou deux voix ensemble (voir ``hauteur.py``), puis répartie entre la **voix
+   lead** et la voix d'**harmonie**, analysées séparément. Chaque voix est
+   découpée en notes, mesurées sur leur centre : l'attaque glissée et le
    vibrato ne sont pas comptés comme des erreurs.
 3. **Écart** de chaque note à la note juste la plus proche, en cents
    (100 cents = un demi-ton). Quand une note tombe entre deux, la tonalité
@@ -28,7 +29,7 @@ from scipy.ndimage import median_filter
 
 from . import audio_io
 from .hauteur import SR as SR_VOIX
-from .hauteur import suivre_voix
+from .hauteur import attribuer_voix, suivre_voix
 
 log = logging.getLogger(__name__)
 
@@ -95,10 +96,16 @@ class AnalyseJustesse:
     tonalite: str | None
     tolerance_cents: float = 20.0
     faux_cents: float = 40.0
+    voix: str = "lead"
+    """« lead » (la mélodie) ou « harmonie » (la seconde voix)."""
 
     @property
     def detecte(self) -> bool:
         return len(self.notes) >= 3
+
+    @property
+    def duree_chantee(self) -> float:
+        return sum(n.duree for n in self.notes)
 
     @property
     def la_hz(self) -> float:
@@ -150,7 +157,7 @@ class AnalyseJustesse:
 
     def resume(self) -> str:
         if not self.detecte:
-            return "pas de chant détecté"
+            return "pas de chant détecté" if self.voix == "lead" else "pas d'harmonie détectée"
         return (
             f"{self.part_juste:.0%} du chant juste, tendance {self.ecart_moyen:+.0f} cents, "
             f"{len(self.fausses)} note(s) fausse(s) dont {sum(n.hors_harmonie for n in self.notes)} hors de l'harmonie"
@@ -251,17 +258,41 @@ def _hauteur_centrale(hauteurs: np.ndarray, fps: float) -> float | None:
     return float(proches.mean()) if proches.size else mediane
 
 
+@dataclass
+class JustesseDesVoix:
+    lead: AnalyseJustesse
+    harmonie: AnalyseJustesse
+
+
+def _mesurer_notes(contour: np.ndarray, fps: float, params: ParametresJustesse) -> list[tuple[float, float, float]]:
+    """Notes d'un contour : (début, fin, hauteur centrale en demi-tons par rapport à La 440)."""
+    hauteurs = combler_trous(contour, int(round(0.065 * fps)))
+    mesures = []
+    for a, b in decouper_notes(hauteurs, fps, params.duree_note_min_s):
+        centrale = _hauteur_centrale(hauteurs[a:b], fps)
+        if centrale is not None:
+            mesures.append((a / fps, b / fps, centrale))
+    return mesures
+
+
 def analyser_justesse(
     pistes: dict[str, Path], params: ParametresJustesse = ParametresJustesse(), zone: tuple[float, float] | None = None
-) -> AnalyseJustesse:
-    """Analyse la justesse de la piste « voix » par rapport aux instruments."""
+) -> JustesseDesVoix:
+    """Analyse la justesse de la voix lead et de la voix d'harmonie par rapport aux instruments."""
     import librosa
 
     voix = _lire_mono([pistes["voix"]], zone, SR_VOIX) if "voix" in pistes else np.zeros(0, np.float32)
     duree = voix.size / SR_VOIX
-    vide = AnalyseJustesse(duree, [], 0.0, "instruments", None, params.tolerance_cents, params.faux_cents)
+
+    def analyse(nom: str, notes: list[Note], accordage: float, reference: str, tonalite_: str | None):
+        return AnalyseJustesse(
+            duree, notes, accordage, reference, tonalite_, params.tolerance_cents, params.faux_cents, nom
+        )
+
     if voix.size < SR_VOIX or not np.any(voix):
-        return vide
+        return JustesseDesVoix(
+            analyse("lead", [], 0.0, "instruments", None), analyse("harmonie", [], 0.0, "instruments", None)
+        )
 
     # Référence : accordage et harmonie des instruments mélodiques.
     instruments = _lire_mono([pistes[n] for n in PISTES_HARMONIQUES if n in pistes], zone, SR_HARMONIE)
@@ -286,24 +317,34 @@ def analyser_justesse(
         chroma = chroma / np.maximum(chroma.max(axis=0, keepdims=True), 1e-9)
 
     # Hauteur chantée (une ou deux voix), seulement là où la voix est bien présente,
-    # découpée en notes mesurées sur leur centre (en demi-tons, par rapport à La 440).
+    # répartie entre lead et harmonie, puis découpée en notes mesurées sur leur centre.
     contours = suivre_voix(voix, params.fmin, params.fmax)
-    fps = contours.fps
-    mesures: list[tuple[float, float, float]] = []  # (début, fin, hauteur centrale)
-    for contour in (contours.haute, contours.basse):
-        hauteurs = combler_trous(contour, int(round(0.065 * fps)))
-        for a, b in decouper_notes(hauteurs, fps, params.duree_note_min_s):
-            centrale = _hauteur_centrale(hauteurs[a:b], fps)
-            if centrale is not None:
-                mesures.append((a / fps, b / fps, centrale))
-    mesures.sort()
-    if not avec_instruments and mesures:
+    lead, harmonie = attribuer_voix(contours)
+    mesures = {
+        "lead": _mesurer_notes(lead, contours.fps, params),
+        "harmonie": _mesurer_notes(harmonie, contours.fps, params),
+    }
+    toutes = mesures["lead"] + mesures["harmonie"]
+    if not avec_instruments and toutes:
         # A cappella : la référence est l'accordage moyen des notes chantées (moyenne
         # circulaire de leur écart au demi-ton, pondérée par la durée).
-        ecarts = np.array([h - round(h) for _, _, h in mesures])
-        durees = np.array([f - d for d, f, _ in mesures])
+        ecarts = np.array([h - round(h) for _, _, h in toutes])
+        durees = np.array([f - d for d, f, _ in toutes])
         accordage = 100.0 * float(np.angle(np.sum(durees * np.exp(2j * np.pi * ecarts)))) / (2 * np.pi)
 
+    reference = "instruments" if avec_instruments else "voix"
+    return JustesseDesVoix(
+        *(
+            analyse(nom, _evaluer(mesures[nom], accordage, gamme, chroma), accordage, reference, nom_tonalite)
+            for nom in ("lead", "harmonie")
+        )
+    )
+
+
+def _evaluer(
+    mesures: list[tuple[float, float, float]], accordage: float, gamme: set[int] | None, chroma: np.ndarray | None
+) -> list[Note]:
+    """Écart de chaque note à la note juste visée, et fausses notes hors de l'harmonie."""
     notes: list[Note] = []
     for debut, fin, centrale in mesures:
         hauteur = centrale - accordage / 100
@@ -321,13 +362,4 @@ def analyser_justesse(
             local = chroma[:, i0:i1].mean(axis=1) if i0 < chroma.shape[1] else np.zeros(12)
             hors_harmonie = bool(local[visee % 12] < 0.3 * max(float(local.max()), 1e-9))
         notes.append(Note(debut, fin, hauteur, visee, ecart, hors_harmonie))
-
-    return AnalyseJustesse(
-        duree,
-        notes,
-        accordage,
-        "instruments" if avec_instruments else "voix",
-        nom_tonalite,
-        params.tolerance_cents,
-        params.faux_cents,
-    )
+    return notes
