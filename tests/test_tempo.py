@@ -124,18 +124,21 @@ def test_pipeline_produit_le_graphique_a_cote_du_mp3(tmp_path, monkeypatch):
     vus = {}
     import musique_repet.pipeline as pipeline
 
-    original = pipeline.tracer
+    original = pipeline.tracer_tempo
 
     def espion(analyse, chemin, titre, date=None):
         vus[titre] = (analyse, chemin, date)
         original(analyse, chemin, titre, date)
 
-    monkeypatch.setattr(pipeline, "tracer", espion)
+    monkeypatch.setattr(pipeline, "tracer_tempo", espion)
     assert executer(_options(entree, sortie), SeparateurCopie()) == 0
 
-    assert sorted(p.name for p in sortie.glob("*.jpg")) == ["20260312-Hallelujah.jpg", "20260312-Le Sud.jpg"]
+    assert sorted(p.name for p in sortie.glob("*-tempo.jpg")) == [
+        "20260312-Hallelujah-tempo.jpg",
+        "20260312-Le Sud-tempo.jpg",
+    ]
     analyse, chemin, date = vus["Le Sud"]
-    assert chemin == sortie / "20260312-Le Sud.jpg" and date == "20260312"
+    assert chemin == sortie / "20260312-Le Sud-tempo.jpg" and date == "20260312"
     assert analyse.sources == ("batterie",)
     assert analyse.mediane == pytest.approx(96, abs=0.5)
 
@@ -146,4 +149,4 @@ def test_pipeline_sans_tempo(tmp_path):
     sf.write(entree / "r.wav", np.repeat(batterie(10, 120)[:, None], 2, axis=1), SR)
     assert executer(_options(entree, sortie, tempo=None), SeparateurCopie()) == 0
     assert len(list(sortie.glob("*.mp3"))) == 1
-    assert not list(sortie.glob("*.jpg"))
+    assert not list(sortie.glob("*-tempo.jpg"))

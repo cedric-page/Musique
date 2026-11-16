@@ -13,6 +13,7 @@ from .echo import ParametresAntiEcho
 from .effets import CHORUS_BASSE, ParametresChorus
 from .mixage import ParametresMixage
 from .pipeline import Options, executer
+from .justesse import ParametresJustesse
 from .paroles import TranscripteurWhisper
 from .separation import MODELE_PAR_DEFAUT, SeparateurDemucs
 from .tempo import ParametresTempo
@@ -113,6 +114,26 @@ def construire_parseur() -> argparse.ArgumentParser:
     )
     p.add_argument("--sans-tempo", action="store_true", help="ne produit pas le graphique du tempo (JPG)")
     p.add_argument(
+        "--sans-justesse", action="store_true", help="ne produit pas le graphique de la justesse du chant (JPG)"
+    )
+    p.add_argument(
+        "--tolerance-cents",
+        type=float,
+        default=ParametresJustesse.tolerance_cents,
+        metavar="CENTS",
+        help=(
+            f"écart jusqu'auquel une note chantée est juste (défaut : {ParametresJustesse.tolerance_cents:g} ; "
+            "100 cents = un demi-ton)"
+        ),
+    )
+    p.add_argument(
+        "--faux-cents",
+        type=float,
+        default=ParametresJustesse.faux_cents,
+        metavar="CENTS",
+        help=f"écart au-delà duquel une note est fausse (défaut : {ParametresJustesse.faux_cents:g})",
+    )
+    p.add_argument(
         "--bpm-min",
         type=float,
         default=ParametresTempo.bpm_min,
@@ -156,6 +177,8 @@ def main(argv: list[str] | None = None) -> int:
         parseur.error("--rt60 doit être positif")
     if not 30 <= args.bpm_min < args.bpm_max <= 400:
         parseur.error("il faut 30 <= --bpm-min < --bpm-max <= 400")
+    if not 0 < args.tolerance_cents < args.faux_cents <= 50:
+        parseur.error("il faut 0 < --tolerance-cents < --faux-cents <= 50")
     try:
         facteurs = charger_config(args.config)
     except (OSError, ValueError) as exc:
@@ -182,6 +205,9 @@ def main(argv: list[str] | None = None) -> int:
         debit_kbps=args.debit,
         anti_echo=ParametresAntiEcho(rt60=args.rt60, attenuation_max_db=args.anti_echo),
         tempo=None if args.sans_tempo else ParametresTempo(bpm_min=args.bpm_min, bpm_max=args.bpm_max),
+        justesse=None
+        if args.sans_justesse
+        else ParametresJustesse(tolerance_cents=args.tolerance_cents, faux_cents=args.faux_cents),
         forcer_separation=args.forcer_separation,
     )
     if args.sans_rognage:

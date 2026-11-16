@@ -8,6 +8,7 @@ from musique_repet.echo import ParametresAntiEcho
 from musique_repet.mixage import ParametresMixage
 from musique_repet.paroles import SegmentParoles, est_hallucination, transcrire_zone, zones_de_voix
 from musique_repet.pipeline import Options, executer
+from musique_repet.justesse import ParametresJustesse
 from musique_repet.tempo import ParametresTempo
 from musique_repet.titre import (
     EntreeRepertoire,
@@ -210,8 +211,8 @@ def preparer(tmp_path, pistes, nom="repet_mardi.wav"):
 
 
 def options(entree, sortie, **kw):
-    # Anti-écho et tempo, testés par ailleurs, sont coupés pour accélérer ces tests.
-    reglages = {"anti_echo": ParametresAntiEcho(attenuation_max_db=0), "tempo": None, **kw}
+    # Anti-écho, tempo et justesse, testés par ailleurs, sont coupés pour accélérer ces tests.
+    reglages = {"anti_echo": ParametresAntiEcho(attenuation_max_db=0), "tempo": None, "justesse": None, **kw}
     return Options(
         entree=entree, sortie=sortie, travail=sortie / "_travail",
         facteurs=charger_config(None), mixage=ParametresMixage(), **reglages,
@@ -226,11 +227,12 @@ def test_sans_csv_chanson_coupee_et_titre_reconnu(tmp_path, scenario, monkeypatc
     entree, sortie = preparer(tmp_path, pistes)
     monkeypatch.setattr("musique_repet.pipeline.date_creation", lambda chemin: "20260312")
     faux = FauxTranscripteur(REFRAIN)
-    avec_tempo = options(entree, sortie, tempo=ParametresTempo())
+    avec_tempo = options(entree, sortie, tempo=ParametresTempo(), justesse=ParametresJustesse())
     assert executer(avec_tempo, SeparateurScenario(pistes), faux) == 0
 
     mp3 = sortie / "20260312-Hallelujah.mp3"
-    assert mp3.exists() and (sortie / "20260312-Hallelujah.jpg").exists()
+    assert mp3.exists() and (sortie / "20260312-Hallelujah-tempo.jpg").exists()
+    assert (sortie / "20260312-Hallelujah-justesse.jpg").exists()
     duree = sf.info(mp3).duration
     assert 72 <= duree <= 80  # 120 s d'enregistrement, ~76 s de chanson
     # Seule la chanson a été transcrite (pas de répertoire : rien à chercher avant).

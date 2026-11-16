@@ -9,7 +9,8 @@ Traitement d'enregistrements de répétition (2 chanteuses, piano, batterie acou
 5. **Volumes personnalisés** : un facteur par instrument, lu dans un fichier JSON, est appliqué.
 6. **Chorus léger sur les voix et la basse**, pour épaissir et élargir un peu le son. Sur la basse, seules les fréquences au-dessus de 250 Hz reçoivent le chorus : les graves restent nets et centrés.
 7. **Mixage** de toutes les pistes, normalisé à -14 LUFS (crête max. -1 dBFS), puis export en **MP3** nommé `AAAAMMJJ-titre.mp3`.
-8. **Analyse du tempo** : un graphique `AAAAMMJJ-titre.jpg` montre les variations de BPM au cours du morceau (voir plus bas).
+8. **Analyse du tempo** : un graphique `AAAAMMJJ-titre-tempo.jpg` montre les variations de BPM au cours du morceau (voir plus bas).
+9. **Justesse du chant** : un graphique `AAAAMMJJ-titre-justesse.jpg` montre, note par note, si la voix est juste par rapport aux instruments, et où sont les fausses notes (voir plus bas).
 
 > Les deux chanteuses sont dans la même piste `voix` : Demucs sépare les instruments, pas les voix entre elles.
 
@@ -106,12 +107,14 @@ Chaque MP3 est nommé `AAAAMMJJ-titre.mp3` :
 
 ```
 sortie/
-├── 20260312-Hallelujah.mp3   # repet_12_mars.mp3 + CSV : un MP3 par morceau
-├── 20260312-Hallelujah.jpg   # … et le graphique de son tempo
+├── 20260312-Hallelujah.mp3            # repet_12_mars.mp3 + CSV : un MP3 par morceau
+├── 20260312-Hallelujah-tempo.jpg      # … le graphique de son tempo
+├── 20260312-Hallelujah-justesse.jpg   # … et celui de la justesse du chant
 ├── 20260312-Le Sud.mp3
-├── 20260312-Le Sud.jpg
-├── 20260315-Let it be.mp3    # repet_15_mars.wav sans CSV : la chanson seule, titre reconnu
-├── 20260315-Let it be.jpg
+├── 20260312-Le Sud-tempo.jpg
+├── 20260312-Le Sud-justesse.jpg
+├── 20260315-Let it be.mp3             # repet_15_mars.wav sans CSV : la chanson seule, titre reconnu
+├── …
 └── _travail/                 # fichiers intermédiaires (réutilisés à la relance)
     ├── decoupes/             # morceaux découpés en .wav
     └── pistes/               # pistes séparées, une par instrument
@@ -135,7 +138,7 @@ Changer ces réglages ne refait pas la séparation, seulement l'atténuation (qu
 
 ### Analyse du tempo
 
-Pour chaque morceau, un graphique JPG du même nom que le MP3 montre comment le tempo a évolué : est-ce que le groupe presse dans les refrains, ralentit dans les passages calmes, finit plus vite qu'il n'a commencé ?
+Pour chaque morceau, le graphique `…-tempo.jpg` montre comment le tempo a évolué : est-ce que le groupe presse dans les refrains, ralentit dans les passages calmes, finit plus vite qu'il n'a commencé ?
 
 ![Exemple de graphique du tempo](docs/exemple-tempo.jpg)
 
@@ -149,6 +152,35 @@ Pour chaque morceau, un graphique JPG du même nom que le MP3 montre comment le 
 Le tempo est mesuré sur la batterie, la basse, la guitare et le piano séparés (pas sur les voix, souvent plus libres), après atténuation de l'écho. Les passages sans pulsation régulière (silence, break, intro jouée librement) ne sont pas tracés plutôt que d'afficher un tempo inventé.
 
 Si une ballade est mesurée au double de son vrai tempo (par exemple 144 au lieu de 72, à cause d'un charleston en croches), baisse le tempo maximal recherché : `--bpm-max 120`. À l'inverse, pour un morceau très rapide lu à moitié, monte `--bpm-min`.
+
+### Justesse du chant
+
+Pour chaque morceau, le graphique `…-justesse.jpg` montre si la voix est juste **par rapport à la musique**, et à quels moments elle ne l'est pas.
+
+![Exemple de graphique de la justesse](docs/exemple-justesse.jpg)
+
+*Exemple obtenu sur un chant synthétique : couplets justes, refrain qui baisse progressivement (0:32-0:50), passage approximatif vers 1:20, et trois fausses notes hors de l'harmonie (croix).*
+
+**Panneau du haut, note par note** : chaque trait est une note chantée, à sa hauteur d'écart avec la note juste, en **cents** (100 cents = un demi-ton). Au-dessus de 0, la note est trop haute ; en dessous, trop basse.
+
+- **vert** : juste (moins de 20 cents d'écart) ;
+- **jaune** : approximatif (20 à 40 cents), ça s'entend sur une note tenue ;
+- **rouge** : faux (plus de 40 cents, presque entre deux notes) ;
+- **croix** : note **hors de l'harmonie**, nommée sur le graphique : une note chantée bien droite, mais qui n'est ni dans la tonalité du morceau ni dans ce que jouent les instruments à ce moment-là (une vraie fausse note, pas un défaut de justesse).
+
+**Panneau du bas, toutes les 8 secondes** : la part du chant juste, pour repérer d'un coup d'œil les passages à retravailler.
+
+**En-tête** : part du chant juste, tendance générale (« un peu bas » si les chanteuses ont tendance à chanter sous la note), nombre de fausses notes et tonalité détectée.
+
+Comment c'est mesuré :
+
+- la référence est **l'accordage réel du groupe**, mesuré sur le piano, la guitare et la basse (affiché dans le sous-titre, par exemple « La = 436,2 Hz ») : si les instruments sont accordés un peu bas, les chanteuses doivent chanter un peu bas avec eux. Sans instrument mélodique (a cappella), la référence est l'accordage moyen des voix ;
+- la hauteur est suivie sur la piste voix séparée, **pour une voix seule ou deux voix qui chantent ensemble** (harmonies en tierce, sixte...) : chacune est mesurée séparément ;
+- chaque note est mesurée sur son centre : l'attaque glissée et le vibrato ne comptent pas comme des erreurs ; les notes de moins de 0,15 s (ornements, passages) ne sont pas évaluées.
+
+Les seuils se règlent : `--tolerance-cents 25` est plus indulgent, `--tolerance-cents 15 --faux-cents 30` plus exigeant.
+
+> Limites : deux voix à l'unisson sont mesurées comme une seule (leur moyenne). Une « blue note » volontaire (tierce mineure sur un accord majeur, par exemple) peut être marquée hors de l'harmonie : les croix sont des notes **à vérifier à l'écoute**.
 
 ### Options utiles
 
@@ -168,6 +200,8 @@ Si une ballade est mesurée au double de son vrai tempo (par exemple 144 au lieu
 | `--repertoire FICHIER` | liste des titres du groupe (défaut : `repertoire.txt` du dossier d'entrée) |
 | `--modele-paroles medium` | modèle Whisper pour les paroles : `tiny`, `base`, `small` (défaut), `medium`, `large-v3` |
 | `--sans-tempo` | ne produit pas le graphique du tempo |
+| `--sans-justesse` | ne produit pas le graphique de la justesse du chant |
+| `--tolerance-cents 20` / `--faux-cents 40` | seuils « juste » et « faux » de la justesse (100 cents = un demi-ton) |
 | `--bpm-min 50` / `--bpm-max 200` | plage de tempos recherchée par l'analyse |
 | `--debit 256` | débit MP3 en kb/s |
 | `--gain-max-db 12` | correction maximale de l'équilibrage, pour ne pas trop amplifier un instrument qui joue peu |
