@@ -93,6 +93,7 @@ def mixer(
     pistes: dict[str, Path],
     facteurs_config: dict[str, float],
     params: ParametresMixage,
+    zone: tuple[float, float] | None = None,
 ) -> tuple[np.ndarray, int, list[ReglagePiste]]:
     """Équilibre, applique les volumes configurés, additionne et normalise.
 
@@ -101,7 +102,7 @@ def mixer(
     sonies: dict[str, float] = {}
     sr_ref = None
     for nom, chemin in pistes.items():
-        audio, sr = audio_io.lire(chemin)
+        audio, sr = audio_io.lire(chemin, *(zone or ()))
         if sr_ref is None:
             sr_ref = sr
         elif sr != sr_ref:
@@ -115,7 +116,7 @@ def mixer(
     for reglage in reglages:
         if reglage.facteur_total == 0:
             continue
-        audio, sr = audio_io.lire(pistes[reglage.nom])
+        audio, sr = audio_io.lire(pistes[reglage.nom], *(zone or ()))
         if reglage.nom in params.chorus:
             audio = chorus(audio, sr, params.chorus[reglage.nom])
         audio *= reglage.facteur_total
@@ -130,11 +131,27 @@ def mixer(
 
     if mix is None:
         # Toutes les pistes sont muettes ou coupées dans la configuration.
-        audio, _ = audio_io.lire(next(iter(pistes.values())))
+        audio, _ = audio_io.lire(next(iter(pistes.values())), *(zone or ()))
         mix = np.zeros_like(audio)
 
     mix = normaliser(mix, sr_ref, params)
     return mix, sr_ref, reglages
+
+
+def fondus(audio: np.ndarray, sr: int, entree_s: float, sortie_s: float) -> np.ndarray:
+    """Fondus d'entrée et de sortie (courbe en sinus², sans clic)."""
+    resultat = audio.copy()
+    n = resultat.shape[0]
+    for duree, au_debut in ((entree_s, True), (sortie_s, False)):
+        k = min(n, int(round(duree * sr)))
+        if k <= 1:
+            continue
+        rampe = (np.sin(np.linspace(0, np.pi / 2, k)) ** 2).astype(resultat.dtype)[:, None]
+        if au_debut:
+            resultat[:k] *= rampe
+        else:
+            resultat[n - k :] *= rampe[::-1]
+    return resultat
 
 
 def normaliser(mix: np.ndarray, sr: int, params: ParametresMixage) -> np.ndarray:

@@ -2,7 +2,7 @@
 
 Traitement d'enregistrements de répétition (2 chanteuses, piano, batterie acoustique, basse, guitare) :
 
-1. **Découpe** : si un fichier `<nom>.csv` accompagne `<nom>.mp3` (ou `.wav`, `.flac`…), l'audio est découpé en morceaux enregistrés en `.wav`. Sans CSV, l'enregistrement complet est gardé en `.wav`.
+1. **Découpe** : si un fichier `<nom>.csv` accompagne `<nom>.mp3` (ou `.wav`, `.flac`…), l'audio est découpé en morceaux enregistrés en `.wav`. Sans CSV, l'enregistrement est traité en entier : ce qui précède et suit la chanson (discussions, accordage, silences) est retiré, et le titre est reconnu d'après les paroles (voir plus bas).
 2. **Séparation** des instruments avec [Demucs](https://github.com/facebookresearch/demucs) (modèle `htdemucs_6s`) : `voix`, `piano`, `batterie`, `basse`, `guitare`, `autre`. Les pistes sont **conservées sur disque** : une relance ne refait la séparation que pour les morceaux qui ont changé.
 3. **Atténuation de l'écho** de la salle sur chaque piste séparée (voir plus bas). Le résultat est aussi gardé sur disque.
 4. **Équilibrage** : la sonie (LUFS, norme ITU-R BS.1770) de chaque piste est mesurée, puis les pistes sont ramenées au même niveau.
@@ -21,7 +21,7 @@ Il faut [uv](https://docs.astral.sh/uv/). `ffmpeg` est seulement nécessaire pou
 uv sync
 ```
 
-Au premier lancement, Demucs télécharge les poids du modèle (~ 50 Mo) depuis `dl.fbaipublicfiles.com`.
+Au premier lancement, Demucs télécharge les poids du modèle (~ 50 Mo) depuis `dl.fbaipublicfiles.com`, et Whisper (reconnaissance des paroles) son modèle `small` (~ 500 Mo) depuis `huggingface.co`.
 
 ## Utilisation
 
@@ -50,6 +50,38 @@ Hallelujah;1:02:10;1:06:40
 - La ligne d'en-tête est facultative ; les lignes vides ou commençant par `#` sont ignorées.
 - Un titre en double devient `Titre (2)`.
 
+### Enregistrement sans CSV : chanson repérée et titre reconnu
+
+Quand un audio n'a pas de CSV, on suppose qu'il contient **une chanson** :
+
+**1. Ce qui précède et suit la chanson est retiré**, d'après les pistes séparées :
+
+- la chanson commence et finit là où le groupe joue ensemble (par exemple 3 sources sur 5 : batterie, basse, guitare, piano, voix) ;
+- un instrument seul collé à la chanson est gardé (intro au piano, résonance du dernier accord), sur 30 s au plus ;
+- une discussion (voix seule), un accordage ou un échauffement séparés de la chanson par un silence sont retirés ;
+- un court fondu adoucit le début et la fin ; les pauses à l'intérieur de la chanson (break) sont gardées.
+
+`--sans-rognage` garde l'enregistrement entier.
+
+> Limite : une introduction *a cappella* (voix seules, sans instrument) ressemble à une discussion et serait coupée. Dans ce cas, utilise un CSV ou `--sans-rognage`.
+
+**2. Le titre est reconnu** pour nommer le MP3 (`20260312-Hallelujah.mp3` au lieu de `20260312-repet_mardi.mp3`). Les paroles de la piste voix sont transcrites en local avec [Whisper](https://github.com/SYSTRAN/faster-whisper), puis :
+
+1. **avec un répertoire** (recommandé) : le titre du répertoire chanté pendant la chanson, ou annoncé dans la minute qui précède (« allez, on fait Le Sud »), est retenu ;
+2. **sans répertoire** : la phrase qui revient le plus dans le refrain est proposée comme titre (« Hallelujah », « Let it be », « On dirait le Sud »...) ;
+3. sinon le nom du fichier est gardé.
+
+Le répertoire est un fichier `repertoire.txt` placé dans le dossier d'entrée (ou indiqué avec `--repertoire`), une chanson par ligne. Des extraits de paroles facultatifs, séparés par `;`, aident à reconnaître une chanson dont le titre n'est pas chanté :
+
+```text
+# Répertoire du groupe
+Hallelujah
+Le Sud ; on dirait le sud ; le temps dure longtemps
+Bohemian Rhapsody ; is this the real life ; is this just fantasy
+```
+
+La transcription prend environ une minute par chanson sur processeur ; elle est gardée dans `_travail` et n'est pas refaite à la relance. `--modele-paroles medium` (ou `large-v3`) reconnaît mieux le chant, plus lentement ; `--sans-titre` désactive la reconnaissance.
+
 ### Fichier de configuration des volumes
 
 ```json
@@ -70,7 +102,7 @@ Facteurs **linéaires**, appliqués après l'équilibrage : `1.0` = inchangé, `
 Chaque MP3 est nommé `AAAAMMJJ-titre.mp3` :
 
 - `AAAAMMJJ` est la **date de création du fichier audio d'origine** ;
-- `titre` est le titre du morceau dans le CSV, ou le nom du fichier audio s'il n'y a pas de CSV.
+- `titre` est le titre du morceau dans le CSV ; sans CSV, le titre reconnu d'après les paroles, ou à défaut le nom du fichier audio.
 
 ```
 sortie/
@@ -78,8 +110,8 @@ sortie/
 ├── 20260312-Hallelujah.jpg   # … et le graphique de son tempo
 ├── 20260312-Le Sud.mp3
 ├── 20260312-Le Sud.jpg
-├── 20260315-jam_libre.mp3    # jam_libre.wav sans CSV : un seul MP3
-├── 20260315-jam_libre.jpg
+├── 20260315-Let it be.mp3    # repet_15_mars.wav sans CSV : la chanson seule, titre reconnu
+├── 20260315-Let it be.jpg
 └── _travail/                 # fichiers intermédiaires (réutilisés à la relance)
     ├── decoupes/             # morceaux découpés en .wav
     └── pistes/               # pistes séparées, une par instrument
@@ -131,6 +163,10 @@ Si une ballade est mesurée au double de son vrai tempo (par exemple 144 au lieu
 | `--rt60 0.4` | durée de réverbération de la salle en secondes |
 | `--chorus 0.3` | dosage du chorus sur les voix (`0` = désactivé, `0.5` = plus marqué) |
 | `--chorus-basse 0.4` | dosage du chorus sur la basse, au-dessus de 250 Hz (`0` = désactivé) |
+| `--sans-rognage` | sans CSV : garde tout l'enregistrement |
+| `--sans-titre` | sans CSV : garde le nom du fichier au lieu de reconnaître le titre |
+| `--repertoire FICHIER` | liste des titres du groupe (défaut : `repertoire.txt` du dossier d'entrée) |
+| `--modele-paroles medium` | modèle Whisper pour les paroles : `tiny`, `base`, `small` (défaut), `medium`, `large-v3` |
 | `--sans-tempo` | ne produit pas le graphique du tempo |
 | `--bpm-min 50` / `--bpm-max 200` | plage de tempos recherchée par l'analyse |
 | `--debit 256` | débit MP3 en kb/s |

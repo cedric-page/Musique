@@ -124,8 +124,11 @@ class AnalyseTempo:
         )
 
 
-def signal_rythmique(pistes: dict[str, Path]) -> tuple[np.ndarray, int, tuple[str, ...]]:
-    """Additionne les pistes rythmiques en mono. Renvoie (signal, fréquence, pistes jouées)."""
+def signal_rythmique(
+    pistes: dict[str, Path], zone: tuple[float, float] | None = None
+) -> tuple[np.ndarray, int, tuple[str, ...]]:
+    """Additionne les pistes rythmiques en mono (sur ``zone`` seulement si fournie).
+    Renvoie (signal, fréquence, pistes jouées)."""
     noms = [n for n in PISTES_RYTHMIQUES if n in pistes]
     if not noms:
         noms = [n for n in pistes if n != "voix"] or list(pistes)
@@ -133,7 +136,7 @@ def signal_rythmique(pistes: dict[str, Path]) -> tuple[np.ndarray, int, tuple[st
     sr = None
     niveaux: dict[str, float] = {}
     for nom in noms:
-        audio, sr_piste = audio_io.lire(pistes[nom])
+        audio, sr_piste = audio_io.lire(pistes[nom], *(zone or ()))
         if sr is None:
             sr = sr_piste
         elif sr_piste != sr:
@@ -325,6 +328,8 @@ def analyser(
     )
 
 
-def analyser_pistes(pistes: dict[str, Path], params: ParametresTempo = ParametresTempo()) -> AnalyseTempo:
-    signal, sr, jouees = signal_rythmique(pistes)
+def analyser_pistes(
+    pistes: dict[str, Path], params: ParametresTempo = ParametresTempo(), zone: tuple[float, float] | None = None
+) -> AnalyseTempo:
+    signal, sr, jouees = signal_rythmique(pistes, zone)
     return analyser(signal, sr, params, jouees)

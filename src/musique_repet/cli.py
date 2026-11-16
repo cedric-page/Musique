@@ -13,8 +13,10 @@ from .echo import ParametresAntiEcho
 from .effets import CHORUS_BASSE, ParametresChorus
 from .mixage import ParametresMixage
 from .pipeline import Options, executer
+from .paroles import TranscripteurWhisper
 from .separation import MODELE_PAR_DEFAUT, SeparateurDemucs
 from .tempo import ParametresTempo
+from .titre import ParametresTitre, lire_repertoire
 
 
 def construire_parseur() -> argparse.ArgumentParser:
@@ -86,6 +88,28 @@ def construire_parseur() -> argparse.ArgumentParser:
             f"dosage du chorus sur la basse (au-dessus de {CHORUS_BASSE.coupure_hz:g} Hz), "
             f"0 pour le désactiver (défaut : {CHORUS_BASSE.melange})"
         ),
+    )
+    p.add_argument(
+        "--sans-rognage",
+        action="store_true",
+        help="sans CSV : garde tout l'enregistrement au lieu de couper ce qui précède et suit la chanson",
+    )
+    p.add_argument(
+        "--sans-titre",
+        action="store_true",
+        help="sans CSV : garde le nom du fichier au lieu de reconnaître le titre d'après les paroles",
+    )
+    p.add_argument(
+        "--repertoire",
+        type=Path,
+        metavar="FICHIER",
+        help="liste des titres du groupe, un par ligne (défaut : repertoire.txt du dossier d'entrée s'il existe)",
+    )
+    p.add_argument(
+        "--modele-paroles",
+        default="small",
+        metavar="MODELE",
+        help="modèle Whisper de transcription : tiny, base, small, medium, large-v3 (défaut : small)",
     )
     p.add_argument("--sans-tempo", action="store_true", help="ne produit pas le graphique du tempo (JPG)")
     p.add_argument(
@@ -160,8 +184,24 @@ def main(argv: list[str] | None = None) -> int:
         tempo=None if args.sans_tempo else ParametresTempo(bpm_min=args.bpm_min, bpm_max=args.bpm_max),
         forcer_separation=args.forcer_separation,
     )
+    if args.sans_rognage:
+        options.rognage = None
+    transcripteur = None
+    if args.sans_titre:
+        options.titres = None
+    else:
+        repertoire = args.repertoire or args.entree / "repertoire.txt"
+        if args.repertoire and not repertoire.is_file():
+            parseur.error(f"répertoire introuvable : {repertoire}")
+        options.titres = ParametresTitre(repertoire=lire_repertoire(repertoire) if repertoire.is_file() else [])
+        if options.titres.repertoire:
+            log.info("Répertoire : %d titre(s) lus dans %s", len(options.titres.repertoire), repertoire)
+        # ctranslate2 (Whisper) ne gère pas « mps » : calcul sur processeur dans ce cas.
+        transcripteur = TranscripteurWhisper(
+            args.modele_paroles, appareil=args.appareil if args.appareil in ("cpu", "cuda") else None
+        )
     separateur = SeparateurDemucs(args.modele, appareil=args.appareil, shifts=args.shifts)
-    echecs = executer(options, separateur)
+    echecs = executer(options, separateur, transcripteur)
     if echecs:
         log.error("%d élément(s) en échec", echecs)
         return 1

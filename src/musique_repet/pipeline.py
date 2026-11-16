@@ -1,5 +1,5 @@
-"""Enchaînement complet : découpe -> séparation -> anti-écho -> équilibrage -> volumes -> MP3,
-puis analyse du tempo (graphique JPG)."""
+"""Enchaînement complet : découpe -> séparation -> anti-écho -> (sans CSV : repérage de la
+chanson et reconnaissance du titre) -> équilibrage -> volumes -> MP3, puis analyse du tempo."""
 
 from __future__ import annotations
 
@@ -12,12 +12,15 @@ from datetime import datetime
 from pathlib import Path
 
 from . import audio_io
+from .chanson import ParametresRognage, detecter_chanson
 from .decoupe import Morceau, lire_csv, nom_fichier_sur
 from .echo import ParametresAntiEcho, attenuer_echo_avec_cache
 from .graphique_tempo import tracer
-from .mixage import ParametresMixage, ReglagePiste, mixer
+from .mixage import ParametresMixage, ReglagePiste, fondus, mixer
+from .paroles import Transcripteur
 from .separation import Separateur, separer_avec_cache
 from .tempo import ParametresTempo, analyser_pistes
+from .titre import ParametresTitre, reconnaitre_titre
 
 log = logging.getLogger(__name__)
 
@@ -33,6 +36,8 @@ class Tache:
     titre: str = ""
     date: str = ""
     """Date de l'enregistrement d'origine, AAAAMMJJ."""
+    sans_csv: bool = False
+    """Enregistrement complet : la chanson y est repérée et son titre reconnu."""
 
 
 @dataclass
@@ -47,6 +52,10 @@ class Options:
     anti_echo: ParametresAntiEcho = field(default_factory=ParametresAntiEcho)
     tempo: ParametresTempo | None = field(default_factory=ParametresTempo)
     """Réglages de l'analyse du tempo ; ``None`` pour ne pas produire de graphique."""
+    rognage: ParametresRognage | None = field(default_factory=ParametresRognage)
+    """Sans CSV : retrait de ce qui précède et suit la chanson ; ``None`` pour tout garder."""
+    titres: ParametresTitre | None = field(default_factory=ParametresTitre)
+    """Sans CSV : reconnaissance du titre ; ``None`` pour garder le nom du fichier."""
 
 
 def _cles_sources(fichiers: list[Path]) -> dict[Path, str]:
@@ -103,7 +112,7 @@ def preparer_taches(source: Path, cle: str, options: Options) -> list[Tache]:
         return [
             Tache(
                 source.name, wav, options.travail / "pistes" / cle, options.sortie / f"{date}-{cle}.mp3",
-                titre=source.stem, date=date,
+                titre=source.stem, date=date, sans_csv=True,
             )
         ]
 
@@ -148,24 +157,75 @@ def _journaliser_reglages(reglages: list[ReglagePiste]) -> None:
         )
 
 
-def traiter_tache(tache: Tache, separateur: Separateur, options: Options) -> None:
+def _reconnaitre(
+    tache: Tache, pistes: dict[str, Path], zone: tuple[float, float] | None, options: Options, transcripteur
+) -> None:
+    """Renomme la tâche d'après le titre reconnu (le nom du fichier est gardé sinon)."""
+    if "voix" not in pistes:
+        return
+    debut, fin = zone or (0.0, audio_io.duree(pistes["voix"]))
+    try:
+        trouve = reconnaitre_titre(pistes["voix"], debut, fin, tache.dossier_pistes, transcripteur, options.titres)
+    except Exception as exc:  # modèle introuvable, pas de connexion au premier usage...
+        log.warning("  Reconnaissance du titre impossible (%s) : le nom du fichier est gardé", exc)
+        log.debug("  Détail :", exc_info=True)
+        return
+    if trouve is None:
+        log.info("  Titre non reconnu : le nom du fichier est gardé")
+        return
+    log.info("  Titre reconnu par le %s : « %s » (%s)", trouve.methode, trouve.titre, trouve.detail)
+    tache.titre = trouve.titre
+    tache.mp3 = tache.mp3.with_name(f"{tache.date}-{nom_fichier_sur(trouve.titre)}.mp3")
+
+
+def traiter_tache(
+    tache: Tache,
+    separateur: Separateur,
+    options: Options,
+    transcripteur: Transcripteur | None = None,
+    noms_pris: set[str] | None = None,
+) -> None:
     log.info("▶ %s", tache.nom_affiche)
     pistes = separer_avec_cache(tache.wav, tache.dossier_pistes, separateur, options.forcer_separation)
     pistes = attenuer_echo_avec_cache(pistes, tache.dossier_pistes / "sans_echo", options.anti_echo)
-    mix, sr, reglages = mixer(pistes, options.facteurs, options.mixage)
+
+    zone = None
+    extrait = None
+    if tache.sans_csv and options.rognage is not None:
+        extrait = detecter_chanson(pistes, options.rognage)
+        log.info("  %s", extrait.description()[:1].upper() + extrait.description()[1:])
+        if extrait.rogne:
+            zone = (extrait.debut, extrait.fin)
+    if tache.sans_csv and options.titres is not None and transcripteur is not None:
+        _reconnaitre(tache, pistes, zone, options, transcripteur)
+    if noms_pris is not None:
+        tache.mp3 = _nom_libre(tache.mp3, noms_pris)
+
+    mix, sr, reglages = mixer(pistes, options.facteurs, options.mixage, zone)
+    if extrait is not None and zone is not None:
+        mix = fondus(
+            mix,
+            sr,
+            entree_s=0.1 if extrait.debut > 0 else 0.0,
+            sortie_s=1.0 if extrait.fin < extrait.duree_totale else 0.0,
+        )
     _journaliser_reglages(reglages)
     audio_io.ecrire_mp3(tache.mp3, mix, sr, options.debit_kbps)
     log.info("  ✔ %s", tache.mp3)
     if options.tempo is not None:
-        analyse = analyser_pistes(pistes, options.tempo)
+        analyse = analyser_pistes(pistes, options.tempo, zone)
         log.info("  Tempo : %s", analyse.resume())
         graphique = tache.mp3.with_suffix(".jpg")
         tracer(analyse, graphique, tache.titre or tache.mp3.stem, tache.date or None)
         log.info("  ✔ %s", graphique)
 
 
-def executer(options: Options, separateur: Separateur) -> int:
-    """Traite tous les audios du dossier d'entrée. Renvoie le nombre d'échecs."""
+def executer(options: Options, separateur: Separateur, transcripteur: Transcripteur | None = None) -> int:
+    """Traite tous les audios du dossier d'entrée. Renvoie le nombre d'échecs.
+
+    ``transcripteur`` : pour reconnaître le titre des enregistrements sans CSV
+    (``None`` : le nom du fichier est gardé).
+    """
     sources = audio_io.lister_audios(options.entree)
     if not sources:
         log.warning("Aucun fichier audio dans %s", options.entree)
@@ -182,9 +242,8 @@ def executer(options: Options, separateur: Separateur) -> int:
             echecs += 1
             continue
         for tache in taches:
-            tache.mp3 = _nom_libre(tache.mp3, noms_pris)
             try:
-                traiter_tache(tache, separateur, options)
+                traiter_tache(tache, separateur, options, transcripteur, noms_pris)
             except Exception:
                 log.exception("Échec du traitement de %s", tache.nom_affiche)
                 echecs += 1
