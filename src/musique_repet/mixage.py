@@ -108,6 +108,28 @@ def calculer_equilibrage(
     return [ReglagePiste(nom, lufs, gains.get(nom, 0.0), facteurs_config.get(nom, 1.0)) for nom, lufs in sonies.items()]
 
 
+def piste_traitee(
+    chemin: Path, reglage: ReglagePiste, params: ParametresMixage, zone: tuple[float, float] | None = None
+) -> tuple[np.ndarray, int]:
+    """Une piste telle qu'elle entre dans le mixage : chorus éventuel, puis gain total."""
+    audio, sr = audio_io.lire(chemin, *(zone or ()))
+    if reglage.nom in params.chorus:
+        audio = chorus(audio, sr, params.chorus[reglage.nom])
+    audio *= reglage.facteur_total
+    return audio, sr
+
+
+def additionner(mix: np.ndarray | None, audio: np.ndarray) -> np.ndarray:
+    """Ajoute ``audio`` au mixage en cours (le plus court est complété par du silence)."""
+    if mix is None:
+        return audio
+    n = max(mix.shape[0], audio.shape[0])
+    if mix.shape[0] < n:
+        mix = np.pad(mix, ((0, n - mix.shape[0]), (0, 0)))
+    mix[: audio.shape[0]] += audio
+    return mix
+
+
 def mixer(
     pistes: dict[str, Path],
     facteurs_config: dict[str, float],
@@ -135,17 +157,8 @@ def mixer(
     for reglage in reglages:
         if reglage.facteur_total == 0:
             continue
-        audio, sr = audio_io.lire(pistes[reglage.nom], *(zone or ()))
-        if reglage.nom in params.chorus:
-            audio = chorus(audio, sr, params.chorus[reglage.nom])
-        audio *= reglage.facteur_total
-        if mix is None:
-            mix = audio
-        else:
-            n = max(mix.shape[0], audio.shape[0])
-            if mix.shape[0] < n:
-                mix = np.pad(mix, ((0, n - mix.shape[0]), (0, 0)))
-            mix[: audio.shape[0]] += audio
+        audio, _ = piste_traitee(pistes[reglage.nom], reglage, params, zone)
+        mix = additionner(mix, audio)
         del audio
 
     if mix is None:

@@ -198,7 +198,7 @@ def test_chaine_complete_avec_lead_et_choeurs(tmp_path, monkeypatch):
     )
     options = Options(
         entree=entree, sortie=sortie, travail=sortie / "_travail", facteurs=charger_config(None),
-        mixage=ParametresMixage(), anti_echo=ParametresAntiEcho(attenuation_max_db=0), tempo=None,
+        mixage=ParametresMixage(), anti_echo=ParametresAntiEcho(attenuation_max_db=0), tempo=None, groove=None,
     )
 
     class Transcripteur:

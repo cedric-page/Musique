@@ -58,3 +58,21 @@ def batterie(duree, tempo, croches=True, silence=None, humain_ms=0.0, graine=0):
         if croches and k + 1 < len(temps):
             poser(hh * 0.7, (instant + temps[k + 1]) / 2)
     return sortie[: int(duree * SR)].astype(np.float32)
+
+
+def basse_par_mesure(duree, tempo, debut_mesure=0, temps_par_mesure=4):
+    """Une note de basse par temps ; la note change au premier temps de chaque mesure.
+
+    ``debut_mesure`` : rang du premier temps qui est un « 1 » (2 = la chanson
+    commence par une levée de deux temps).
+    """
+    sortie = np.zeros(int(duree * SR))
+    t = np.arange(int(0.4 * SR)) / SR
+    notes = [41, 43, 45, 48]  # Fa, Sol, La, Do
+    for k, instant in enumerate(temps_des_battements(duree, tempo)):
+        mesure = (k - debut_mesure) // temps_par_mesure
+        f = 440 * 2 ** ((notes[mesure % len(notes)] - 69) / 12)
+        i = int(instant * SR)
+        son = (np.sin(2 * np.pi * f * t) + 0.5 * np.sin(4 * np.pi * f * t)) * np.exp(-t / 0.25) * 0.3
+        sortie[i : i + son.size] += son[: sortie.size - i]
+    return sortie.astype(np.float32)

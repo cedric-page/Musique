@@ -17,6 +17,7 @@ from .chanson import ParametresRognage, detecter_chanson
 from .decoupe import Morceau, lire_csv, nom_fichier_sur
 from .echo import ParametresAntiEcho, attenuer_echo_avec_cache
 from .graphique_tempo import tracer as tracer_tempo
+from .groove import ParametresGroove, mixer_groove
 from .mixage import ParametresMixage, ReglagePiste, fondus, mixer
 from .empreinte import ReconnaisseurAudio, identifier
 from .paroles import Transcripteur
@@ -55,6 +56,8 @@ class Options:
     anti_echo: ParametresAntiEcho = field(default_factory=ParametresAntiEcho)
     tempo: ParametresTempo | None = field(default_factory=ParametresTempo)
     """Réglages de l'analyse du tempo ; ``None`` pour ne pas produire de graphique."""
+    groove: ParametresGroove | None = field(default_factory=ParametresGroove)
+    """Piste « -groove » (batterie, basse et click) ; ``None`` pour ne pas la produire."""
     rognage: ParametresRognage | None = field(default_factory=ParametresRognage)
     """Sans CSV : retrait de ce qui précède et suit la chanson ; ``None`` pour tout garder."""
     titres: ParametresTitre | None = field(default_factory=ParametresTitre)
@@ -231,23 +234,40 @@ def traiter_tache(
     if noms_pris is not None:
         tache.mp3 = _nom_libre(tache.mp3, noms_pris)
 
-    mix, sr, reglages = mixer(pistes, options.facteurs, options.mixage, zone)
-    if extrait is not None and zone is not None:
-        mix = fondus(
-            mix,
-            sr,
+    def adoucir(audio, sr_audio):
+        """Fondus d'entrée et de sortie quand la chanson a été découpée dans l'enregistrement."""
+        if extrait is None or zone is None:
+            return audio
+        return fondus(
+            audio,
+            sr_audio,
             entree_s=0.1 if extrait.debut > 0 else 0.0,
             sortie_s=1.0 if extrait.fin < extrait.duree_totale else 0.0,
         )
+
+    mix, sr, reglages = mixer(pistes, options.facteurs, options.mixage, zone)
     _journaliser_reglages(reglages)
-    audio_io.ecrire_mp3(tache.mp3, mix, sr, options.debit_kbps)
+    audio_io.ecrire_mp3(tache.mp3, adoucir(mix, sr), sr, options.debit_kbps)
     log.info("  ✔ %s", tache.mp3)
-    if options.tempo is not None:
-        analyse = analyser_pistes(pistes, options.tempo, zone)
+    del mix
+
+    analyse = None
+    if options.tempo is not None or options.groove is not None:
+        analyse = analyser_pistes(pistes, options.tempo or ParametresTempo(), zone)
         log.info("  Tempo : %s", analyse.resume())
+    if options.tempo is not None:
         graphique = tache.mp3.with_name(f"{tache.mp3.stem}-tempo.jpg")
         tracer_tempo(analyse, graphique, tache.titre or tache.mp3.stem, tache.date or None)
         log.info("  ✔ %s", graphique)
+    if options.groove is not None:
+        groove, sr_groove, click = mixer_groove(pistes, reglages, options.mixage, zone, analyse, options.groove)
+        chemin = tache.mp3.with_name(f"{tache.mp3.stem}-groove.mp3")
+        audio_io.ecrire_mp3(chemin, adoucir(groove, sr_groove), sr_groove, options.debit_kbps)
+        if click is None:
+            log.info("  Groove : pas de pulsation régulière, batterie et basse sans click")
+        else:
+            log.info("  Groove : %s", click.resume(options.groove.mesures_par_bloc))
+        log.info("  ✔ %s", chemin)
 
 
 def executer(

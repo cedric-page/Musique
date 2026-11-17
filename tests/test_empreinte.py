@@ -167,7 +167,7 @@ def lancer(tmp_path, pistes, reconnaisseur, transcripteur=None, repertoire=None)
     sf.write(entree / "repet_mardi.wav", np.repeat(sum(pistes.values())[:, None], 2, axis=1), SR, subtype="PCM_24")
     options = Options(
         entree=entree, sortie=sortie, travail=sortie / "_travail", facteurs=charger_config(None),
-        mixage=ParametresMixage(), anti_echo=ParametresAntiEcho(attenuation_max_db=0), tempo=None,
+        mixage=ParametresMixage(), anti_echo=ParametresAntiEcho(attenuation_max_db=0), tempo=None, groove=None,
         titres=ParametresTitre(repertoire=repertoire or []),
     )
     assert executer(options, SeparateurScenario(pistes), transcripteur, reconnaisseur) == 0

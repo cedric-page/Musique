@@ -9,7 +9,8 @@ Traitement d'enregistrements de répétition (2 chanteuses, piano, batterie acou
 5. **Volumes personnalisés** : un facteur par instrument, lu dans un fichier JSON, est appliqué.
 6. **Chorus léger sur les voix (lead et chœurs) et la basse**, pour épaissir et élargir un peu le son. Sur la basse, seules les fréquences au-dessus de 250 Hz reçoivent le chorus : les graves restent nets et centrés.
 7. **Mixage** de toutes les pistes, normalisé à -14 LUFS (crête max. -1 dBFS), puis export en **MP3** nommé `AAAAMMJJ-titre.mp3`.
-8. **Analyse du tempo** : un graphique `AAAAMMJJ-titre-tempo.jpg` montre les variations de BPM au cours du morceau (voir plus bas).
+8. **Piste groove** : `AAAAMMJJ-titre-groove.mp3` ne contient que la batterie, la basse et un **click** qui suit le tempo du groupe, réajusté toutes les 4 mesures (voir plus bas).
+9. **Analyse du tempo** : un graphique `AAAAMMJJ-titre-tempo.jpg` montre les variations de BPM au cours du morceau (voir plus bas).
 
 > Le lead et les chœurs sont séparés selon leur **rôle** (qui chante la mélodie, qui l'accompagne), pas selon la chanteuse : si elles échangent les rôles en cours de morceau, chaque piste suit le rôle.
 
@@ -131,6 +132,7 @@ Chaque MP3 est nommé `AAAAMMJJ-titre.mp3` :
 ```
 sortie/
 ├── 20260312-Hallelujah.mp3            # repet_12_mars.mp3 + CSV : un MP3 par morceau
+├── 20260312-Hallelujah-groove.mp3     # … batterie, basse et click
 ├── 20260312-Hallelujah-tempo.jpg      # … le graphique de son tempo
 ├── 20260312-Le Sud.mp3
 ├── 20260312-Le Sud-tempo.jpg
@@ -175,6 +177,20 @@ Le tempo est mesuré sur la batterie, la basse, la guitare et le piano séparés
 
 Si une ballade est mesurée au double de son vrai tempo (par exemple 144 au lieu de 72, à cause d'un charleston en croches), baisse le tempo maximal recherché : `--bpm-max 120`. À l'inverse, pour un morceau très rapide lu à moitié, monte `--bpm-min`.
 
+### Piste groove : batterie, basse et click
+
+À côté de chaque MP3, `…-groove.mp3` ne contient que la **batterie**, la **basse** et un **click**, pour travailler la mise en place de la section rythmique.
+
+- La batterie et la basse sont réglées exactement comme dans le MP3 complet (équilibrage, volumes du fichier de configuration, chorus de la basse).
+- Le click marque chaque temps : un son aigu sur le premier temps de la mesure, plus grave et plus doux sur les autres.
+- Son tempo est **constant pendant 4 mesures**, calé sur les temps réellement joués pendant ces 4 mesures, puis il se réajuste pour les 4 suivantes. Il colle à la musique sans la suivre note à note : à l'intérieur d'un bloc, on entend si le groupe presse ou ralentit par rapport au click.
+- Le premier temps de la mesure est repéré sur les pistes séparées : la grosse caisse frappe surtout sur les temps 1 et 3, la caisse claire sur 2 et 4, et la basse change de note en début de mesure.
+- Les clicks sont calés sur le début des frappes de la batterie, pour sonner en même temps qu'elle.
+
+Réglages : `--temps-par-mesure 3` pour une valse (4 par défaut), `--mesures-click 8` pour réajuster le tempo toutes les 8 mesures, `--volume-click 6` pour un click plus fort (ou `-6` plus doux). `--sans-groove` ne produit pas cette piste.
+
+> Sans pulsation régulière (morceau joué librement), la piste groove est produite sans click. Le repérage du premier temps peut se tromper sur un rythme inhabituel : l'accent tombe alors sur un autre temps, mais le click reste sur les temps.
+
 ### Options utiles
 
 | Option | Rôle |
@@ -196,6 +212,10 @@ Si une ballade est mesurée au double de son vrai tempo (par exemple 144 au lieu
 | `--repertoire FICHIER` | liste des titres du groupe (défaut : `repertoire.txt` du dossier d'entrée) |
 | `--modele-paroles medium` | modèle Whisper pour les paroles : `tiny`, `base`, `small` (défaut), `medium`, `large-v3` |
 | `--sans-tempo` | ne produit pas le graphique du tempo |
+| `--sans-groove` | ne produit pas la piste `-groove` (batterie, basse et click) |
+| `--temps-par-mesure 3` | temps par mesure pour le click (4 par défaut) |
+| `--mesures-click 4` | le tempo du click est réajusté toutes les N mesures |
+| `--volume-click 6` | click plus fort (en dB, `-6` = plus doux) |
 | `--bpm-min 50` / `--bpm-max 200` | plage de tempos recherchée par l'analyse |
 | `--debit 256` | débit MP3 en kb/s |
 | `--gain-max-db 12` | correction maximale de l'équilibrage, pour ne pas trop amplifier un instrument qui joue peu |

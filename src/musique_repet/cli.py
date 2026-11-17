@@ -17,6 +17,7 @@ from .empreinte import ReconnaisseurShazam
 from .paroles import TranscripteurWhisper
 from .separation import MODELE_PAR_DEFAUT, SeparateurDemucs
 from .voix import MODELE_PAR_DEFAUT as MODELE_CHOEURS, SeparateurLeadChoeurs
+from .groove import ParametresGroove
 from .tempo import ParametresTempo
 from .titre import ParametresTitre, lire_repertoire
 
@@ -134,6 +135,30 @@ def construire_parseur() -> argparse.ArgumentParser:
     )
     p.add_argument("--sans-tempo", action="store_true", help="ne produit pas le graphique du tempo (JPG)")
     p.add_argument(
+        "--sans-groove", action="store_true", help="ne produit pas la piste -groove (batterie, basse et click)"
+    )
+    p.add_argument(
+        "--temps-par-mesure",
+        type=int,
+        default=ParametresGroove.temps_par_mesure,
+        metavar="N",
+        help=f"temps par mesure pour le click (défaut : {ParametresGroove.temps_par_mesure} ; 3 pour une valse)",
+    )
+    p.add_argument(
+        "--mesures-click",
+        type=int,
+        default=ParametresGroove.mesures_par_bloc,
+        metavar="N",
+        help=f"le tempo du click est réajusté toutes les N mesures (défaut : {ParametresGroove.mesures_par_bloc})",
+    )
+    p.add_argument(
+        "--volume-click",
+        type=float,
+        default=ParametresGroove.volume_click_db,
+        metavar="DB",
+        help="volume du click par rapport à son réglage automatique, en dB (+6 plus fort, -6 plus doux)",
+    )
+    p.add_argument(
         "--bpm-min",
         type=float,
         default=ParametresTempo.bpm_min,
@@ -177,6 +202,8 @@ def main(argv: list[str] | None = None) -> int:
         parseur.error("--rt60 doit être positif")
     if not 30 <= args.bpm_min < args.bpm_max <= 400:
         parseur.error("il faut 30 <= --bpm-min < --bpm-max <= 400")
+    if args.temps_par_mesure < 1 or args.mesures_click < 1:
+        parseur.error("--temps-par-mesure et --mesures-click doivent être positifs")
     try:
         facteurs = charger_config(args.config)
     except (OSError, ValueError) as exc:
@@ -203,6 +230,9 @@ def main(argv: list[str] | None = None) -> int:
         debit_kbps=args.debit,
         anti_echo=ParametresAntiEcho(rt60=args.rt60, attenuation_max_db=args.anti_echo),
         tempo=None if args.sans_tempo else ParametresTempo(bpm_min=args.bpm_min, bpm_max=args.bpm_max),
+        groove=None
+        if args.sans_groove
+        else ParametresGroove(args.temps_par_mesure, args.mesures_click, args.volume_click),
         forcer_separation=args.forcer_separation,
     )
     if args.sans_rognage:

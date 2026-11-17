@@ -109,6 +109,7 @@ class SeparateurCopie:
 
 
 def _options(entree, sortie, **kw):
+    kw.setdefault("groove", None)  # piste groove testée à part (test_groove.py)
     return Options(
         entree=entree, sortie=sortie, travail=sortie / "_travail",
         facteurs=charger_config(None), mixage=ParametresMixage(), **kw,
