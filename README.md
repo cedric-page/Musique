@@ -3,15 +3,15 @@
 Traitement d'enregistrements de répétition (2 chanteuses, piano, batterie acoustique, basse, guitare) :
 
 1. **Découpe** : si un fichier `<nom>.csv` accompagne `<nom>.mp3` (ou `.wav`, `.flac`…), l'audio est découpé en morceaux enregistrés en `.wav`. Sans CSV, l'enregistrement est traité en entier : ce qui précède et suit la chanson (discussions, accordage, silences) est retiré, et le titre est reconnu d'après les paroles (voir plus bas).
-2. **Séparation** des instruments avec [Demucs](https://github.com/facebookresearch/demucs) (modèle `htdemucs_6s`) : `voix`, `piano`, `batterie`, `basse`, `guitare`, `autre`. Les pistes sont **conservées sur disque** : une relance ne refait la séparation que pour les morceaux qui ont changé.
+2. **Séparation** des instruments avec [Demucs](https://github.com/facebookresearch/demucs) (modèle `htdemucs_6s`) : voix, `piano`, `batterie`, `basse`, `guitare`, `autre`. La voix est ensuite séparée en deux pistes, **`lead`** (voix principale) et **`choeurs`**, avec un modèle [audio-separator](https://pypi.org/project/audio-separator/) (voir plus bas). Les pistes sont **conservées sur disque** : une relance ne refait la séparation que pour les morceaux qui ont changé.
 3. **Atténuation de l'écho** de la salle sur chaque piste séparée (voir plus bas). Le résultat est aussi gardé sur disque.
 4. **Équilibrage** : la sonie (LUFS, norme ITU-R BS.1770) de chaque piste est mesurée, puis les pistes sont ramenées au même niveau.
 5. **Volumes personnalisés** : un facteur par instrument, lu dans un fichier JSON, est appliqué.
-6. **Chorus léger sur les voix et la basse**, pour épaissir et élargir un peu le son. Sur la basse, seules les fréquences au-dessus de 250 Hz reçoivent le chorus : les graves restent nets et centrés.
+6. **Chorus léger sur les voix (lead et chœurs) et la basse**, pour épaissir et élargir un peu le son. Sur la basse, seules les fréquences au-dessus de 250 Hz reçoivent le chorus : les graves restent nets et centrés.
 7. **Mixage** de toutes les pistes, normalisé à -14 LUFS (crête max. -1 dBFS), puis export en **MP3** nommé `AAAAMMJJ-titre.mp3`.
 8. **Analyse du tempo** : un graphique `AAAAMMJJ-titre-tempo.jpg` montre les variations de BPM au cours du morceau (voir plus bas).
 
-> Les deux chanteuses sont dans la même piste `voix` : Demucs sépare les instruments, pas les voix entre elles.
+> Le lead et les chœurs sont séparés selon leur **rôle** (qui chante la mélodie, qui l'accompagne), pas selon la chanteuse : si elles échangent les rôles en cours de morceau, chaque piste suit le rôle.
 
 ## Installation
 
@@ -21,7 +21,9 @@ Il faut [uv](https://docs.astral.sh/uv/). `ffmpeg` est seulement nécessaire pou
 uv sync
 ```
 
-Au premier lancement, Demucs télécharge les poids du modèle (~ 50 Mo) depuis `dl.fbaipublicfiles.com`, et Whisper (reconnaissance des paroles) son modèle `small` (~ 500 Mo) depuis `huggingface.co`.
+Il faut Python 3.10 à 3.13 (uv l'installe s'il manque) : les bibliothèques de calcul utilisées ne suivent pas encore les versions plus récentes.
+
+Au premier lancement, les modèles sont téléchargés : Demucs (~ 50 Mo) depuis `dl.fbaipublicfiles.com`, le modèle lead / chœurs (~ 220 Mo) depuis GitHub dans `~/.cache/musique-repet/modeles`, et Whisper (reconnaissance des paroles, ~ 500 Mo) depuis `huggingface.co`.
 
 ## Utilisation
 
@@ -86,11 +88,29 @@ Bohemian Rhapsody ; is this the real life ; is this just fantasy
 
 La réponse de Shazam et la transcription (environ une minute par chanson sur processeur) sont gardées dans `_travail` : elles ne sont pas refaites à la relance. `--modele-paroles medium` (ou `large-v3`) reconnaît mieux le chant, plus lentement ; `--sans-titre` désactive la reconnaissance.
 
+### Voix lead et chœurs
+
+Demucs isole les voix ensemble. Un second modèle sépare ensuite cette piste voix en deux :
+
+- **`lead`** : la voix principale, celle qui chante la mélodie ;
+- **`choeurs`** : les voix d'accompagnement (harmonies, chœurs).
+
+Le modèle par défaut, `UVR-BVE-4B_SN-44100-2.pth` (« Backing Vocal Extractor » de la communauté UVR), est conçu pour une piste voix déjà isolée. D'autres modèles d'audio-separator peuvent être essayés avec `--modele-choeurs`, par exemple le modèle karaoké `mel_band_roformer_karaoke_aufr33_viperx_sdr_10.1956.ckpt` (~ 900 Mo).
+
+Les deux pistes se règlent séparément dans le fichier de volumes (`"lead"`, `"choeurs"`), ce qui permet par exemple de couper le lead pour que la chanteuse travaille sa partie par-dessus les chœurs. À l'équilibrage, les chœurs reçoivent la **même correction que le lead** : leur écart de volume reste celui de la répétition.
+
+- Si le modèle ne trouve pas de voix lead nette (lead plus de 10 dB sous les chœurs sur toute la chanson), la séparation est jugée ratée : la voix reste en une seule piste `voix`, avec un avertissement.
+- La séparation prend environ deux fois la durée du morceau sur processeur (beaucoup moins sur carte graphique) ; elle est gardée sur disque et n'est pas refaite à la relance.
+- `--sans-choeurs` garde une seule piste `voix`.
+
+> Limite : la séparation lead / chœurs est plus difficile qu'en studio. Dans une prise de salle, les deux voix ont le même écho et souvent un volume proche ; quand elles chantent ensemble au même volume, une partie d'une voix peut passer dans l'autre piste. À écouter : si le résultat ne convient pas, `--sans-choeurs` revient à une seule piste voix.
+
 ### Fichier de configuration des volumes
 
 ```json
 {
-  "voix": 1.0,
+  "lead": 1.0,
+  "choeurs": 0.9,
   "piano": 1.0,
   "batterie": 0.8,
   "basse": 1.0,
@@ -99,7 +119,7 @@ La réponse de Shazam et la transcription (environ une minute par chanson sur pr
 }
 ```
 
-Facteurs **linéaires**, appliqués après l'équilibrage : `1.0` = inchangé, `0.5` ≈ -6 dB, `2.0` ≈ +6 dB, `0` = piste coupée (pratique pour travailler sa partie). Un instrument absent du fichier reste à `1.0`. Noms anglais acceptés aussi (`vocals`, `drums`, `bass`, `guitar`, `other`).
+Facteurs **linéaires**, appliqués après l'équilibrage : `1.0` = inchangé, `0.5` ≈ -6 dB, `2.0` ≈ +6 dB, `0` = piste coupée (pratique pour travailler sa partie). Un instrument absent du fichier reste à `1.0`. `"voix"` règle à la fois le lead et les chœurs (sauf s'ils ont leur propre réglage). Noms anglais acceptés aussi (`vocals`, `drums`, `bass`, `guitar`, `other`), ainsi que `"chœurs"`, `"harmonies"` ou `"voix lead"`.
 
 ### Organisation des fichiers produits
 
@@ -119,6 +139,7 @@ sortie/
 └── _travail/                 # fichiers intermédiaires (réutilisés à la relance)
     ├── decoupes/             # morceaux découpés en .wav
     └── pistes/               # pistes séparées, une par instrument
+        ├── …/lead_choeurs/   # la voix séparée en lead et chœurs
         └── …/sans_echo/      # les mêmes après atténuation de l'écho
 ```
 
@@ -162,10 +183,12 @@ Si une ballade est mesurée au double de son vrai tempo (par exemple 144 au lieu
 | `--appareil cuda` | séparation sur GPU (beaucoup plus rapide ; auto-détecté par défaut) |
 | `--shifts 2` | séparation plus propre mais plus lente |
 | `--forcer-separation` | ignore le cache et refait la séparation |
+| `--sans-choeurs` | garde une seule piste voix au lieu de séparer lead et chœurs |
+| `--modele-choeurs NOM` | autre modèle d'audio-separator pour séparer lead et chœurs |
 | `--lufs-cible -16` | sonie du MP3 final |
 | `--anti-echo 12` | atténuation max. de l'écho de la salle en dB (`0` = désactivé) |
 | `--rt60 0.4` | durée de réverbération de la salle en secondes |
-| `--chorus 0.3` | dosage du chorus sur les voix (`0` = désactivé, `0.5` = plus marqué) |
+| `--chorus 0.3` | dosage du chorus sur les voix, lead et chœurs (`0` = désactivé, `0.5` = plus marqué) |
 | `--chorus-basse 0.4` | dosage du chorus sur la basse, au-dessus de 250 Hz (`0` = désactivé) |
 | `--sans-rognage` | sans CSV : garde tout l'enregistrement |
 | `--sans-titre` | sans CSV : garde le nom du fichier au lieu de reconnaître le titre |

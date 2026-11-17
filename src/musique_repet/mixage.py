@@ -49,9 +49,17 @@ class ParametresMixage:
     crete_max_db: float = -1.0
     """Crête maximale du mixage final (dBFS)."""
     chorus: dict[str, ParametresChorus] = field(
-        default_factory=lambda: {"voix": ParametresChorus(), "basse": CHORUS_BASSE}
+        default_factory=lambda: {
+            "voix": ParametresChorus(),
+            "lead": ParametresChorus(),
+            "choeurs": ParametresChorus(),
+            "basse": CHORUS_BASSE,
+        }
     )
     """Pistes recevant un chorus, avec leurs réglages."""
+    pistes_liees: dict[str, str] = field(default_factory=lambda: {"choeurs": "lead"})
+    """Pistes qui reçoivent la même correction d'équilibrage qu'une autre : les chœurs
+    suivent le lead, pour garder l'équilibre entre les chanteuses tel qu'il a été chanté."""
 
 
 @dataclass
@@ -72,21 +80,32 @@ def calculer_equilibrage(
     """Calcule le gain de chaque piste pour les amener à la même sonie.
 
     La cible est la médiane des pistes actives, ce qui conserve le niveau
-    global. Les pistes muettes ou exclues ne sont pas modifiées.
+    global. Les pistes muettes ou exclues ne sont pas modifiées. Une piste liée
+    (les chœurs) reçoit la même correction que sa piste de référence (le lead).
     """
+    def active(nom: str) -> bool:
+        return sonies.get(nom, -math.inf) > params.seuil_silence_lufs
+
+    liees = {
+        nom: reference
+        for nom, reference in params.pistes_liees.items()
+        if nom in sonies and active(reference) and reference not in params.exclues_equilibrage
+    }
     actives = {
         nom: lufs
         for nom, lufs in sonies.items()
-        if lufs > params.seuil_silence_lufs and nom not in params.exclues_equilibrage
+        if active(nom) and nom not in params.exclues_equilibrage and nom not in liees
     }
     cible = float(np.median(list(actives.values()))) if actives else None
-    reglages = []
-    for nom, lufs in sonies.items():
-        gain = 0.0
-        if cible is not None and nom in actives:
-            gain = float(np.clip(cible - lufs, -params.gain_max_db, params.gain_max_db))
-        reglages.append(ReglagePiste(nom, lufs, gain, facteurs_config.get(nom, 1.0)))
-    return reglages
+    gains = {
+        nom: float(np.clip(cible - lufs, -params.gain_max_db, params.gain_max_db))
+        for nom, lufs in actives.items()
+        if cible is not None
+    }
+    for nom, reference in liees.items():
+        if active(nom):
+            gains[nom] = gains.get(reference, 0.0)
+    return [ReglagePiste(nom, lufs, gains.get(nom, 0.0), facteurs_config.get(nom, 1.0)) for nom, lufs in sonies.items()]
 
 
 def mixer(

@@ -131,7 +131,7 @@ def signal_rythmique(
     Renvoie (signal, fréquence, pistes jouées)."""
     noms = [n for n in PISTES_RYTHMIQUES if n in pistes]
     if not noms:
-        noms = [n for n in pistes if n != "voix"] or list(pistes)
+        noms = [n for n in pistes if n not in ("voix", "lead", "choeurs")] or list(pistes)
     total: np.ndarray | None = None
     sr = None
     niveaux: dict[str, float] = {}

@@ -16,6 +16,7 @@ from .pipeline import Options, executer
 from .empreinte import ReconnaisseurShazam
 from .paroles import TranscripteurWhisper
 from .separation import MODELE_PAR_DEFAUT, SeparateurDemucs
+from .voix import MODELE_PAR_DEFAUT as MODELE_CHOEURS, SeparateurLeadChoeurs
 from .tempo import ParametresTempo
 from .titre import ParametresTitre, lire_repertoire
 
@@ -46,6 +47,17 @@ def construire_parseur() -> argparse.ArgumentParser:
     p.add_argument("--appareil", choices=["cpu", "cuda", "mps"], help="calcul de la séparation (défaut : auto)")
     p.add_argument("--shifts", type=int, default=1, help="passes de séparation, plus = meilleur mais plus lent")
     p.add_argument("--forcer-separation", action="store_true", help="refait la séparation même si elle est en cache")
+    p.add_argument(
+        "--sans-choeurs",
+        action="store_true",
+        help="garde une seule piste voix au lieu de séparer la voix lead et les chœurs",
+    )
+    p.add_argument(
+        "--modele-choeurs",
+        default=MODELE_CHOEURS,
+        metavar="MODELE",
+        help=f"modèle « karaoké » d'audio-separator qui sépare lead et chœurs (défaut : {MODELE_CHOEURS})",
+    )
     p.add_argument("--debit", type=int, default=192, help="débit MP3 en kb/s (défaut : 192)")
     p.add_argument("--lufs-cible", type=float, default=-14.0, help="sonie du MP3 final (défaut : -14 LUFS)")
     p.add_argument("--gain-max-db", type=float, default=12.0, help="correction max. de l'équilibrage (défaut : 12 dB)")
@@ -78,7 +90,10 @@ def construire_parseur() -> argparse.ArgumentParser:
         type=float,
         default=ParametresChorus.melange,
         metavar="DOSAGE",
-        help=f"dosage du chorus sur les voix, 0 pour le désactiver (défaut : {ParametresChorus.melange})",
+        help=(
+            f"dosage du chorus sur les voix (lead et chœurs), 0 pour le désactiver "
+            f"(défaut : {ParametresChorus.melange})"
+        ),
     )
     p.add_argument(
         "--chorus-basse",
@@ -179,7 +194,7 @@ def main(argv: list[str] | None = None) -> int:
             chorus={
                 nom: params
                 for nom, params in (
-                    ("voix", ParametresChorus(melange=args.chorus)),
+                    *((nom, ParametresChorus(melange=args.chorus)) for nom in ("voix", "lead", "choeurs")),
                     ("basse", replace(CHORUS_BASSE, melange=args.chorus_basse)),
                 )
                 if params.melange > 0
@@ -210,7 +225,8 @@ def main(argv: list[str] | None = None) -> int:
         if not args.sans_shazam:
             reconnaisseur = ReconnaisseurShazam()
     separateur = SeparateurDemucs(args.modele, appareil=args.appareil, shifts=args.shifts)
-    echecs = executer(options, separateur, transcripteur, reconnaisseur)
+    separateur_voix = None if args.sans_choeurs else SeparateurLeadChoeurs(args.modele_choeurs)
+    echecs = executer(options, separateur, transcripteur, reconnaisseur, separateur_voix)
     if echecs:
         log.error("%d élément(s) en échec", echecs)
         return 1

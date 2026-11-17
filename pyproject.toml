@@ -3,8 +3,10 @@ name = "musique-repet"
 version = "0.1.0"
 description = "Découpe, séparation de pistes, équilibrage et mixage MP3 d'enregistrements de répétition"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.14"
 dependencies = [
+    "audio-separator[cpu]>=0.45,<0.46",
+    "audioread>=3.0",
     "demucs>=4.0.1",
     "faster-whisper>=1.1",
     "lameenc>=1.7",
