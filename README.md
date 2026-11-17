@@ -24,7 +24,7 @@ uv sync
 
 Il faut Python 3.10 à 3.13 (uv l'installe s'il manque) : les bibliothèques de calcul utilisées ne suivent pas encore les versions plus récentes.
 
-Au premier lancement, les modèles sont téléchargés : Demucs (~ 50 Mo) depuis `dl.fbaipublicfiles.com`, le modèle lead / chœurs (~ 220 Mo) depuis GitHub dans `~/.cache/musique-repet/modeles`, et Whisper (reconnaissance des paroles, ~ 500 Mo) depuis `huggingface.co`.
+Au premier lancement, les modèles sont téléchargés : Demucs (~ 50 Mo) depuis `dl.fbaipublicfiles.com`, le modèle lead / chœurs (~ 900 Mo) depuis GitHub dans `~/.cache/musique-repet/modeles`, et Whisper (reconnaissance des paroles, ~ 500 Mo) depuis `huggingface.co`.
 
 ## Utilisation
 
@@ -96,15 +96,17 @@ Demucs isole les voix ensemble. Un second modèle sépare ensuite cette piste vo
 - **`lead`** : la voix principale, celle qui chante la mélodie ;
 - **`choeurs`** : les voix d'accompagnement (harmonies, chœurs).
 
-Le modèle par défaut, `UVR-BVE-4B_SN-44100-2.pth` (« Backing Vocal Extractor » de la communauté UVR), est conçu pour une piste voix déjà isolée. D'autres modèles d'audio-separator peuvent être essayés avec `--modele-choeurs`, par exemple le modèle karaoké `mel_band_roformer_karaoke_aufr33_viperx_sdr_10.1956.ckpt` (~ 900 Mo).
+Le modèle par défaut, `mel_band_roformer_karaoke_aufr33_viperx_sdr_10.1956.ckpt` (modèle « karaoké » Mel-Roformer d'aufr33 et viperx), extrait la voix lead ; tout le reste de la piste voix forme les chœurs. Il sépare aussi bien les voix avec l'écho d'une grande salle que sans.
 
 Les deux pistes se règlent séparément dans le fichier de volumes (`"lead"`, `"choeurs"`), ce qui permet par exemple de couper le lead pour que la chanteuse travaille sa partie par-dessus les chœurs. À l'équilibrage, les chœurs reçoivent la **même correction que le lead** : leur écart de volume reste celui de la répétition.
 
+- Pour chaque morceau, le journal indique le niveau des chœurs trouvés, par exemple « Chœurs : 8 dB sous le lead ».
 - Si le modèle ne trouve pas de voix lead nette (lead plus de 10 dB sous les chœurs sur toute la chanson), la séparation est jugée ratée : la voix reste en une seule piste `voix`, avec un avertissement.
-- La séparation prend environ deux fois la durée du morceau sur processeur (beaucoup moins sur carte graphique) ; elle est gardée sur disque et n'est pas refaite à la relance.
+- La séparation prend deux à quatre fois la durée du morceau sur processeur, nettement moins sur la puce graphique d'un Mac Apple Silicon ou sur une carte graphique. Elle est gardée sur disque et n'est pas refaite à la relance (sauf si on change de modèle).
 - `--sans-choeurs` garde une seule piste `voix`.
+- `--modele-choeurs` permet d'essayer un autre modèle d'audio-separator. Les modèles « BVE » (`UVR-BVE-4B_SN-44100-2.pth`) sont à éviter sur une prise de salle : ils reconnaissent les chœurs à leur écho et, quand la salle résonne, rangent toutes les voix dans les chœurs.
 
-> Limite : la séparation lead / chœurs est plus difficile qu'en studio. Dans une prise de salle, les deux voix ont le même écho et souvent un volume proche ; quand elles chantent ensemble au même volume, une partie d'une voix peut passer dans l'autre piste. À écouter : si le résultat ne convient pas, `--sans-choeurs` revient à une seule piste voix.
+> Limite : quand les deux chanteuses chantent ensemble au même volume, une partie d'une voix peut passer dans l'autre piste. À écouter : si le résultat ne convient pas, `--sans-choeurs` revient à une seule piste voix.
 
 ### Fichier de configuration des volumes
 

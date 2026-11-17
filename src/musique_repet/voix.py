@@ -1,15 +1,17 @@
 """Séparation de la piste voix en deux pistes : la voix **lead** et les **chœurs**.
 
-Demucs isole les voix ensemble, sans les distinguer. Un modèle de la
-bibliothèque audio-separator, appliqué à cette piste voix, sépare la voix lead
-des chœurs. Par défaut, c'est un modèle « BVE » (Backing Vocal Extractor), conçu
-pour une piste voix déjà isolée ; les modèles « karaoké », prévus pour des
-morceaux complets, peuvent aussi être choisis.
+Demucs isole les voix ensemble, sans les distinguer. Un modèle « karaoké » de
+la bibliothèque audio-separator (Mel-Roformer Karaoke par défaut), appliqué à
+cette piste voix, en extrait la voix lead ; le reste forme les chœurs.
+
+Les modèles « BVE » (Backing Vocal Extractor) peuvent aussi être choisis, mais
+ils reconnaissent les chœurs à leur écho : dans une prise de salle, où toutes
+les voix ont de l'écho, ils rangent tout dans les chœurs.
 
 Si le modèle ne trouve pas de voix lead nette (lead plus de 10 dB sous les
 chœurs sur toute la chanson), la séparation est jugée ratée et la voix reste en
 une seule piste. Le résultat est gardé sur disque : une relance ne refait la
-séparation que si la piste voix a changé.
+séparation que si la piste voix ou le modèle a changé.
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ from . import audio_io
 
 log = logging.getLogger(__name__)
 
-MODELE_PAR_DEFAUT = "UVR-BVE-4B_SN-44100-2.pth"
+MODELE_PAR_DEFAUT = "mel_band_roformer_karaoke_aufr33_viperx_sdr_10.1956.ckpt"
 ECART_LEAD_MIN_DB = -10.0
 """En dessous (lead par rapport aux chœurs, sur toute la chanson), la séparation est jugée ratée."""
 FICHIER_META = "separation_voix.json"
@@ -46,9 +48,9 @@ class SeparateurLeadChoeurs:
     """Sépare lead et chœurs avec un modèle d'audio-separator, téléchargé au premier usage
     dans ``~/.cache/musique-repet/modeles``.
 
-    Un modèle « BVE » extrait les chœurs : sa piste « Vocals » contient les chœurs,
-    l'autre le lead. Un modèle « karaoké » extrait la voix lead : sa piste
-    « Vocals » est le lead, l'autre les chœurs.
+    Un modèle « karaoké » extrait la voix lead : sa piste « Vocals » est le lead,
+    l'autre les chœurs. Un modèle « BVE » extrait les chœurs : sa piste « Vocals »
+    contient les chœurs, l'autre le lead.
     """
 
     def __init__(self, modele: str = MODELE_PAR_DEFAUT, dossier_modeles: Path = DOSSIER_MODELES) -> None:
@@ -114,6 +116,16 @@ def _niveau_db(audio: np.ndarray) -> float:
     return float(10 * np.log10(float(np.mean(np.square(audio, dtype=np.float64))) + 1e-20))
 
 
+def _position_choeurs(ecart_db: float) -> str:
+    """Niveau des chœurs par rapport au lead, pour le journal (``ecart_db`` = lead - chœurs)."""
+    if ecart_db > 40:
+        return "quasi muets (pas de chœurs dans ce morceau ?)"
+    if abs(ecart_db) < 0.5:
+        return "au même niveau que le lead"
+    position = "sous le" if ecart_db > 0 else "au-dessus du"
+    return f"{abs(ecart_db):.0f} dB {position} lead"
+
+
 def separer_voix_avec_cache(
     pistes: dict[str, Path], dossier: Path, separateur: SeparateurVoix | None, forcer: bool = False
 ) -> dict[str, Path]:
@@ -137,6 +149,8 @@ def separer_voix_avec_cache(
                     return pistes
                 if all(resultat[n].exists() for n in ("lead", "choeurs")):
                     log.info("  Voix lead et chœurs déjà séparés, réutilisation de %s", dossier)
+                    if "ecart_db" in donnees:
+                        log.info("  Chœurs : %s", _position_choeurs(donnees["ecart_db"]))
                     return resultat
         except (OSError, json.JSONDecodeError):
             pass
@@ -159,10 +173,16 @@ def separer_voix_avec_cache(
             audio_io.ecrire_wav(
                 resultat[nom], _ajuster(audio, reference.frames, reference.channels), sr, sous_type="FLOAT"
             )
+        log.info("  Chœurs : %s", _position_choeurs(ecart))
     else:
         log.warning(
-            "  Pas de voix lead nette (%.0f dB sous les chœurs) : la voix reste en une seule piste", -ecart
+            "  Pas de voix lead nette (%.0f dB sous les chœurs) : la voix reste en une seule piste "
+            "(un autre modèle peut être essayé avec --modele-choeurs)",
+            -ecart,
         )
     # Écrit en dernier : le cache n'est valide que si les pistes sont sur disque.
-    meta.write_text(json.dumps({"signature": signature, "separee": separee}, indent=2), encoding="utf-8")
+    meta.write_text(
+        json.dumps({"signature": signature, "separee": separee, "ecart_db": round(ecart, 1)}, indent=2),
+        encoding="utf-8",
+    )
     return resultat if separee else pistes

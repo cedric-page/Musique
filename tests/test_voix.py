@@ -11,7 +11,7 @@ from musique_repet.config import charger_config
 from musique_repet.echo import ParametresAntiEcho
 from musique_repet.mixage import ParametresMixage, calculer_equilibrage
 from musique_repet.pipeline import Options, executer
-from musique_repet.voix import SeparateurLeadChoeurs, separer_voix_avec_cache
+from musique_repet.voix import MODELE_PAR_DEFAUT, SeparateurLeadChoeurs, separer_voix_avec_cache
 
 
 def sinus(duree, freq, amplitude, sr=SR):
@@ -47,9 +47,12 @@ def pistes(tmp_path):
 # --- Séparation et cache ---------------------------------------------------------------
 
 
-def test_voix_remplacee_par_lead_et_choeurs(tmp_path, pistes):
+def test_voix_remplacee_par_lead_et_choeurs(tmp_path, pistes, caplog):
+    caplog.set_level("INFO")
     faux = FauxSeparateurVoix()
     resultat = separer_voix_avec_cache(pistes, tmp_path / "lead_choeurs", faux)
+    assert "Chœurs : 7 dB sous le lead" in caplog.text  # 0,3 contre 0,7
+    caplog.clear()
     assert sorted(resultat) == ["choeurs", "lead", "piano"]
     lead, _ = sf.read(resultat["lead"], always_2d=True)
     choeurs, _ = sf.read(resultat["choeurs"], always_2d=True)
@@ -58,6 +61,7 @@ def test_voix_remplacee_par_lead_et_choeurs(tmp_path, pistes):
     assert np.allclose(lead + choeurs, voix, atol=1e-6)  # rien n'est perdu
     # Relance : réutilisé ; --forcer-separation : refait.
     assert separer_voix_avec_cache(pistes, tmp_path / "lead_choeurs", faux) == resultat and faux.appels == 1
+    assert "réutilisation" in caplog.text and "Chœurs : 7 dB sous le lead" in caplog.text
     separer_voix_avec_cache(pistes, tmp_path / "lead_choeurs", faux, forcer=True)
     assert faux.appels == 2
 
@@ -127,6 +131,25 @@ def test_quelle_piste_est_le_lead_selon_le_modele(tmp_path, pistes, monkeypatch,
     assert np.allclose(choeurs, (1 - part_lead) * voix, atol=1e-6)
     # Pas de renormalisation séparée des deux pistes : l'équilibre entre chanteuses est gardé.
     assert FauxSeparator.derniers_reglages["normalization_threshold"] == 1.0
+
+
+def test_le_modele_par_defaut_extrait_le_lead():
+    # Un modèle BVE reconnaît les chœurs à leur écho : dans une prise de salle, il range
+    # toutes les voix dans les chœurs. Le modèle par défaut est un modèle karaoké.
+    separateur = SeparateurLeadChoeurs()
+    assert separateur.modele == MODELE_PAR_DEFAUT and "karaoke" in MODELE_PAR_DEFAUT
+    assert not separateur.choeurs_dans_vocals
+
+
+@pytest.mark.parametrize(
+    "ecart,texte",
+    [(7.4, "7 dB sous le lead"), (-3.2, "3 dB au-dessus du lead"), (0.2, "au même niveau que le lead"),
+     (55, "quasi muets (pas de chœurs dans ce morceau ?)")],
+)
+def test_niveau_des_choeurs_dans_le_journal(ecart, texte):
+    from musique_repet.voix import _position_choeurs
+
+    assert _position_choeurs(ecart) == texte
 
 
 def test_sorties_inattendues(tmp_path, pistes, monkeypatch):
