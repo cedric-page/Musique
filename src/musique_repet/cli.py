@@ -13,6 +13,7 @@ from .echo import ParametresAntiEcho
 from .effets import CHORUS_BASSE, ParametresChorus
 from .mixage import ParametresMixage
 from .pipeline import Options, executer
+from .empreinte import ReconnaisseurShazam
 from .paroles import TranscripteurWhisper
 from .separation import MODELE_PAR_DEFAUT, SeparateurDemucs
 from .tempo import ParametresTempo
@@ -97,7 +98,12 @@ def construire_parseur() -> argparse.ArgumentParser:
     p.add_argument(
         "--sans-titre",
         action="store_true",
-        help="sans CSV : garde le nom du fichier au lieu de reconnaître le titre d'après les paroles",
+        help="sans CSV : garde le nom du fichier au lieu de reconnaître le titre (Shazam, paroles)",
+    )
+    p.add_argument(
+        "--sans-shazam",
+        action="store_true",
+        help="sans CSV : ne cherche pas le titre avec Shazam, seulement d'après les paroles",
     )
     p.add_argument(
         "--repertoire",
@@ -187,6 +193,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.sans_rognage:
         options.rognage = None
     transcripteur = None
+    reconnaisseur = None
     if args.sans_titre:
         options.titres = None
     else:
@@ -200,8 +207,10 @@ def main(argv: list[str] | None = None) -> int:
         transcripteur = TranscripteurWhisper(
             args.modele_paroles, appareil=args.appareil if args.appareil in ("cpu", "cuda") else None
         )
+        if not args.sans_shazam:
+            reconnaisseur = ReconnaisseurShazam()
     separateur = SeparateurDemucs(args.modele, appareil=args.appareil, shifts=args.shifts)
-    echecs = executer(options, separateur, transcripteur)
+    echecs = executer(options, separateur, transcripteur, reconnaisseur)
     if echecs:
         log.error("%d élément(s) en échec", echecs)
         return 1

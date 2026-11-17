@@ -65,11 +65,15 @@ Quand un audio n'a pas de CSV, on suppose qu'il contient **une chanson** :
 
 > Limite : une introduction *a cappella* (voix seules, sans instrument) ressemble à une discussion et serait coupée. Dans ce cas, utilise un CSV ou `--sans-rognage`.
 
-**2. Le titre est reconnu** pour nommer le MP3 (`20260312-Hallelujah.mp3` au lieu de `20260312-repet_mardi.mp3`). Les paroles de la piste voix sont transcrites en local avec [Whisper](https://github.com/SYSTRAN/faster-whisper), puis :
+**2. Le titre est reconnu** pour nommer le MP3 (`20260312-Hallelujah.mp3` au lieu de `20260312-repet_mardi.mp3`), dans cet ordre :
 
-1. **avec un répertoire** (recommandé) : le titre du répertoire chanté pendant la chanson, ou annoncé dans la minute qui précède (« allez, on fait Le Sud »), est retenu ;
-2. **sans répertoire** : la phrase qui revient le plus dans le refrain est proposée comme titre (« Hallelujah », « Let it be », « On dirait le Sud »...) ;
+1. **façon Shazam** : trois extraits de 12 s de la chanson sont soumis à Shazam (avec la bibliothèque [shazamio](https://pypi.org/project/shazamio/)). Le morceau est retenu s'il est trouvé sur deux extraits, ou sur un seul avec une correspondance exacte ; les mentions de version (« Remastered », « Live »...) sont retirées du titre, et l'orthographe du répertoire est reprise si le morceau y figure ;
+2. sinon, **d'après les paroles**, transcrites en local avec [Whisper](https://github.com/SYSTRAN/faster-whisper) :
+   - **avec un répertoire** (recommandé) : le titre du répertoire chanté pendant la chanson, ou annoncé dans la minute qui précède (« allez, on fait Le Sud »), est retenu ;
+   - **sans répertoire** : la phrase qui revient le plus dans le refrain est proposée comme titre (« Hallelujah », « Let it be », « On dirait le Sud »...) ;
 3. sinon le nom du fichier est gardé.
+
+> Shazam reconnaît des **enregistrements** : il trouve le morceau quand l'original passe dans la pièce (on joue par-dessus le disque) ou sur une reprise très fidèle, mais souvent **pas sur la version du groupe**, avec ses propres sons, tempo et tonalité. C'est alors la reconnaissance par les paroles qui prend le relais. Pour Shazam, il faut une connexion Internet ; seule une **empreinte** des extraits est envoyée, pas l'audio. Shazam n'ayant pas d'interface publique, shazamio utilise celle de son application : elle peut cesser de fonctionner du jour au lendemain, et la reconnaissance par les paroles reste alors disponible. `--sans-shazam` désactive cette étape.
 
 Le répertoire est un fichier `repertoire.txt` placé dans le dossier d'entrée (ou indiqué avec `--repertoire`), une chanson par ligne. Des extraits de paroles facultatifs, séparés par `;`, aident à reconnaître une chanson dont le titre n'est pas chanté :
 
@@ -80,7 +84,7 @@ Le Sud ; on dirait le sud ; le temps dure longtemps
 Bohemian Rhapsody ; is this the real life ; is this just fantasy
 ```
 
-La transcription prend environ une minute par chanson sur processeur ; elle est gardée dans `_travail` et n'est pas refaite à la relance. `--modele-paroles medium` (ou `large-v3`) reconnaît mieux le chant, plus lentement ; `--sans-titre` désactive la reconnaissance.
+La réponse de Shazam et la transcription (environ une minute par chanson sur processeur) sont gardées dans `_travail` : elles ne sont pas refaites à la relance. `--modele-paroles medium` (ou `large-v3`) reconnaît mieux le chant, plus lentement ; `--sans-titre` désactive la reconnaissance.
 
 ### Fichier de configuration des volumes
 
@@ -165,6 +169,7 @@ Si une ballade est mesurée au double de son vrai tempo (par exemple 144 au lieu
 | `--chorus-basse 0.4` | dosage du chorus sur la basse, au-dessus de 250 Hz (`0` = désactivé) |
 | `--sans-rognage` | sans CSV : garde tout l'enregistrement |
 | `--sans-titre` | sans CSV : garde le nom du fichier au lieu de reconnaître le titre |
+| `--sans-shazam` | sans CSV : reconnaît le titre seulement d'après les paroles, sans Shazam |
 | `--repertoire FICHIER` | liste des titres du groupe (défaut : `repertoire.txt` du dossier d'entrée) |
 | `--modele-paroles medium` | modèle Whisper pour les paroles : `tiny`, `base`, `small` (défaut), `medium`, `large-v3` |
 | `--sans-tempo` | ne produit pas le graphique du tempo |

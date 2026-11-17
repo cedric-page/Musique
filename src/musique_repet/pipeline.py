@@ -1,5 +1,6 @@
 """Enchaînement complet : découpe -> séparation -> anti-écho -> (sans CSV : repérage de la
-chanson et reconnaissance du titre) -> équilibrage -> volumes -> MP3, puis graphique du tempo."""
+chanson et reconnaissance du titre, façon Shazam puis d'après les paroles) -> équilibrage ->
+volumes -> MP3, puis graphique du tempo."""
 
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ from .decoupe import Morceau, lire_csv, nom_fichier_sur
 from .echo import ParametresAntiEcho, attenuer_echo_avec_cache
 from .graphique_tempo import tracer as tracer_tempo
 from .mixage import ParametresMixage, ReglagePiste, fondus, mixer
+from .empreinte import ReconnaisseurAudio, identifier
 from .paroles import Transcripteur
 from .separation import Separateur, separer_avec_cache
 from .tempo import ParametresTempo, analyser_pistes
@@ -158,22 +160,42 @@ def _journaliser_reglages(reglages: list[ReglagePiste]) -> None:
 
 
 def _reconnaitre(
-    tache: Tache, pistes: dict[str, Path], zone: tuple[float, float] | None, options: Options, transcripteur
+    tache: Tache,
+    pistes: dict[str, Path],
+    zone: tuple[float, float] | None,
+    options: Options,
+    transcripteur: Transcripteur | None,
+    reconnaisseur: ReconnaisseurAudio | None,
 ) -> None:
-    """Renomme la tâche d'après le titre reconnu (le nom du fichier est gardé sinon)."""
-    if "voix" not in pistes:
-        return
-    debut, fin = zone or (0.0, audio_io.duree(pistes["voix"]))
-    try:
-        trouve = reconnaitre_titre(pistes["voix"], debut, fin, tache.dossier_pistes, transcripteur, options.titres)
-    except Exception as exc:  # modèle introuvable, pas de connexion au premier usage...
-        log.warning("  Reconnaissance du titre impossible (%s) : le nom du fichier est gardé", exc)
-        log.debug("  Détail :", exc_info=True)
-        return
+    """Renomme la tâche d'après le titre reconnu (le nom du fichier est gardé sinon).
+
+    D'abord par empreinte audio (façon Shazam), puis d'après les paroles.
+    """
+    debut, fin = zone or (0.0, audio_io.duree(tache.wav))
+    trouve = None
+    if reconnaisseur is not None:
+        try:
+            trouve = identifier(
+                tache.wav, debut, fin, reconnaisseur, tache.dossier_pistes / "empreinte.json",
+                options.titres.repertoire,
+            )
+        except Exception as exc:  # pas de connexion, service indisponible...
+            log.warning("  Reconnaissance par %s impossible (%s)", reconnaisseur.identifiant.capitalize(), exc)
+            log.debug("  Détail :", exc_info=True)
+        if trouve is None and transcripteur is not None:
+            log.info(
+                "  Pas de réponse sûre de %s : reconnaissance d'après les paroles", reconnaisseur.identifiant.capitalize()
+            )
+    if trouve is None and transcripteur is not None and "voix" in pistes:
+        try:
+            trouve = reconnaitre_titre(pistes["voix"], debut, fin, tache.dossier_pistes, transcripteur, options.titres)
+        except Exception as exc:  # modèle introuvable, pas de connexion au premier usage...
+            log.warning("  Reconnaissance d'après les paroles impossible (%s)", exc)
+            log.debug("  Détail :", exc_info=True)
     if trouve is None:
         log.info("  Titre non reconnu : le nom du fichier est gardé")
         return
-    log.info("  Titre reconnu par le %s : « %s » (%s)", trouve.methode, trouve.titre, trouve.detail)
+    log.info("  Titre reconnu (%s) : « %s » — %s", trouve.methode, trouve.titre, trouve.detail)
     tache.titre = trouve.titre
     tache.mp3 = tache.mp3.with_name(f"{tache.date}-{nom_fichier_sur(trouve.titre)}.mp3")
 
@@ -184,6 +206,7 @@ def traiter_tache(
     options: Options,
     transcripteur: Transcripteur | None = None,
     noms_pris: set[str] | None = None,
+    reconnaisseur: ReconnaisseurAudio | None = None,
 ) -> None:
     log.info("▶ %s", tache.nom_affiche)
     pistes = separer_avec_cache(tache.wav, tache.dossier_pistes, separateur, options.forcer_separation)
@@ -196,8 +219,8 @@ def traiter_tache(
         log.info("  %s", extrait.description()[:1].upper() + extrait.description()[1:])
         if extrait.rogne:
             zone = (extrait.debut, extrait.fin)
-    if tache.sans_csv and options.titres is not None and transcripteur is not None:
-        _reconnaitre(tache, pistes, zone, options, transcripteur)
+    if tache.sans_csv and options.titres is not None and (transcripteur or reconnaisseur) is not None:
+        _reconnaitre(tache, pistes, zone, options, transcripteur, reconnaisseur)
     if noms_pris is not None:
         tache.mp3 = _nom_libre(tache.mp3, noms_pris)
 
@@ -220,11 +243,17 @@ def traiter_tache(
         log.info("  ✔ %s", graphique)
 
 
-def executer(options: Options, separateur: Separateur, transcripteur: Transcripteur | None = None) -> int:
+def executer(
+    options: Options,
+    separateur: Separateur,
+    transcripteur: Transcripteur | None = None,
+    reconnaisseur: ReconnaisseurAudio | None = None,
+) -> int:
     """Traite tous les audios du dossier d'entrée. Renvoie le nombre d'échecs.
 
-    ``transcripteur`` : pour reconnaître le titre des enregistrements sans CSV
-    (``None`` : le nom du fichier est gardé).
+    Pour reconnaître le titre des enregistrements sans CSV : ``reconnaisseur``
+    (empreinte audio, façon Shazam) puis ``transcripteur`` (paroles). Sans l'un
+    ni l'autre, le nom du fichier est gardé.
     """
     sources = audio_io.lister_audios(options.entree)
     if not sources:
@@ -243,7 +272,7 @@ def executer(options: Options, separateur: Separateur, transcripteur: Transcript
             continue
         for tache in taches:
             try:
-                traiter_tache(tache, separateur, options, transcripteur, noms_pris)
+                traiter_tache(tache, separateur, options, transcripteur, noms_pris, reconnaisseur)
             except Exception:
                 log.exception("Échec du traitement de %s", tache.nom_affiche)
                 echecs += 1

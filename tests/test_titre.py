@@ -279,7 +279,7 @@ def test_transcription_impossible_n_empeche_pas_le_mp3(tmp_path, scenario, monke
     monkeypatch.setattr("musique_repet.pipeline.date_creation", lambda chemin: "20260312")
     assert executer(options(entree, sortie), SeparateurScenario(pistes), TranscripteurHorsLigne()) == 0
     assert (sortie / "20260312-repet_mardi.mp3").exists()
-    assert "Reconnaissance du titre impossible" in caplog.text
+    assert "Reconnaissance d'après les paroles impossible" in caplog.text
 
 
 def test_sans_rognage_garde_tout(tmp_path, scenario, monkeypatch):
