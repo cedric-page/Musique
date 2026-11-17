@@ -1,6 +1,5 @@
 """Enchaînement complet : découpe -> séparation -> anti-écho -> (sans CSV : repérage de la
-chanson et reconnaissance du titre) -> équilibrage -> volumes -> MP3, puis graphiques du tempo
-et de la justesse du chant."""
+chanson et reconnaissance du titre) -> équilibrage -> volumes -> MP3, puis graphique du tempo."""
 
 from __future__ import annotations
 
@@ -16,9 +15,7 @@ from . import audio_io
 from .chanson import ParametresRognage, detecter_chanson
 from .decoupe import Morceau, lire_csv, nom_fichier_sur
 from .echo import ParametresAntiEcho, attenuer_echo_avec_cache
-from .graphique_justesse import tracer as tracer_justesse
 from .graphique_tempo import tracer as tracer_tempo
-from .justesse import ParametresJustesse, analyser_justesse
 from .mixage import ParametresMixage, ReglagePiste, fondus, mixer
 from .paroles import Transcripteur
 from .separation import Separateur, separer_avec_cache
@@ -59,8 +56,6 @@ class Options:
     """Sans CSV : retrait de ce qui précède et suit la chanson ; ``None`` pour tout garder."""
     titres: ParametresTitre | None = field(default_factory=ParametresTitre)
     """Sans CSV : reconnaissance du titre ; ``None`` pour garder le nom du fichier."""
-    justesse: ParametresJustesse | None = field(default_factory=ParametresJustesse)
-    """Réglages de l'analyse de la justesse du chant ; ``None`` pour ne pas produire de graphique."""
 
 
 def _cles_sources(fichiers: list[Path]) -> dict[Path, str]:
@@ -217,22 +212,12 @@ def traiter_tache(
     _journaliser_reglages(reglages)
     audio_io.ecrire_mp3(tache.mp3, mix, sr, options.debit_kbps)
     log.info("  ✔ %s", tache.mp3)
-    titre = tache.titre or tache.mp3.stem
     if options.tempo is not None:
         analyse = analyser_pistes(pistes, options.tempo, zone)
         log.info("  Tempo : %s", analyse.resume())
         graphique = tache.mp3.with_name(f"{tache.mp3.stem}-tempo.jpg")
-        tracer_tempo(analyse, graphique, titre, tache.date or None)
+        tracer_tempo(analyse, graphique, tache.titre or tache.mp3.stem, tache.date or None)
         log.info("  ✔ %s", graphique)
-    if options.justesse is not None:
-        voix = analyser_justesse(pistes, options.justesse, zone)
-        for analyse in (voix.lead, voix.harmonie):
-            log.info("  Justesse (%s) : %s", analyse.voix, analyse.resume())
-            if analyse.voix == "harmonie" and not analyse.detecte:
-                continue  # pas de seconde voix : pas de graphique
-            graphique = tache.mp3.with_name(f"{tache.mp3.stem}-justesse-{analyse.voix}.jpg")
-            tracer_justesse(analyse, graphique, titre, tache.date or None)
-            log.info("  ✔ %s", graphique)
 
 
 def executer(options: Options, separateur: Separateur, transcripteur: Transcripteur | None = None) -> int:

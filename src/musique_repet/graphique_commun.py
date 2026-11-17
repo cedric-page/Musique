@@ -12,10 +12,6 @@ GRILLE = "#e1e0d9"
 AXE = "#c3c2b7"
 SERIE = "#2a78d6"  # bleu, première série
 SERIE_CLAIRE = "#9ec5f4"  # même bleu, plus clair : données en retrait
-# Couleurs d'état (réservées à juste / approximatif / faux, toujours avec une légende).
-BON = "#0ca30c"
-ATTENTION = "#fab219"
-CRITIQUE = "#d03b3b"
 
 
 def minutes_secondes(secondes: float, _position=None) -> str:
