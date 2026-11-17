@@ -182,3 +182,25 @@ def test_piste_groove_a_cote_du_mp3(tmp_path, monkeypatch, caplog):
     assert sf.info(groove).duration == pytest.approx(sf.info(complet).duration, abs=0.1)
     assert "Groove : click à 110 BPM" in caplog.text
     assert not (sortie / "20260312-Le Sud-tempo.jpg").exists()  # le graphique reste désactivable à part
+
+
+@pytest.mark.parametrize("renfort", [3.0, 6.0])
+def test_basse_renforcee_dans_le_groove(tmp_path, renfort):
+    # Batterie dans les aigus, basse à 100 Hz : on compare leur rapport dans le mixage
+    # complet et dans le groove (sans click, pour ne mesurer que les deux pistes).
+    rng = np.random.default_rng(0)
+    t = np.arange(10 * SR) / SR
+    aigus = np.diff(rng.standard_normal(10 * SR + 1)).astype(np.float32) * 0.05
+    basse = (0.2 * np.sin(2 * np.pi * 100 * t)).astype(np.float32)
+    pistes = ecrire(tmp_path, batterie=aigus, basse=basse)
+    params = ParametresMixage(chorus={})
+    complet, _, reglages = mixer(pistes, charger_config(None), params)
+    groove, _, click = mixer_groove(pistes, reglages, params, None, None, ParametresGroove(gain_basse_db=renfort))
+    assert click is None
+
+    def rapport(audio):
+        spectre = np.abs(np.fft.rfft(audio.mean(axis=1))) ** 2
+        f = np.fft.rfftfreq(audio.shape[0], 1 / SR)
+        return 10 * np.log10(spectre[(f > 90) & (f < 110)].sum() / spectre[(f > 6000) & (f < 9000)].sum())
+
+    assert rapport(groove) - rapport(complet) == pytest.approx(renfort, abs=0.2)

@@ -38,6 +38,10 @@ class ParametresGroove:
     """Le tempo du click est réajusté toutes les ``mesures_par_bloc`` mesures."""
     volume_click_db: float = 0.0
     """Volume du click par rapport à son réglage automatique (+6 = plus fort, -6 = plus doux)."""
+    gain_basse_db: float = 3.0
+    """Renfort de la basse par rapport au mixage complet : sans les autres instruments, elle
+    doit ressortir nettement face à la batterie (ses notes graves passent mal sur de petits
+    haut-parleurs)."""
 
 
 @dataclass
@@ -237,13 +241,15 @@ def mixer_groove(
     analyse: AnalyseTempo | None,
     params: ParametresGroove = ParametresGroove(),
 ) -> tuple[np.ndarray, int, Click | None]:
-    """Batterie + basse (réglées comme dans le mixage complet) + click, normalisés."""
+    """Batterie + basse (réglées comme dans le mixage complet, basse renforcée) + click, normalisés."""
     par_nom = {r.nom: r for r in reglages}
     mix = None
     sr = None
     for nom in ("batterie", "basse"):
         if nom in pistes and nom in par_nom and par_nom[nom].facteur_total > 0:
             audio, sr = piste_traitee(pistes[nom], par_nom[nom], params_mixage, zone)
+            if nom == "basse":
+                audio *= 10 ** (params.gain_basse_db / 20)
             mix = additionner(mix, audio)
     if mix is None:
         reference, sr = audio_io.lire(next(iter(pistes.values())), *(zone or ()))

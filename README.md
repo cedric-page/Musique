@@ -181,13 +181,13 @@ Si une ballade est mesurée au double de son vrai tempo (par exemple 144 au lieu
 
 À côté de chaque MP3, `…-groove.mp3` ne contient que la **batterie**, la **basse** et un **click**, pour travailler la mise en place de la section rythmique.
 
-- La batterie et la basse sont réglées exactement comme dans le MP3 complet (équilibrage, volumes du fichier de configuration, chorus de la basse).
+- La batterie et la basse sont réglées comme dans le MP3 complet (équilibrage, volumes du fichier de configuration, chorus de la basse), mais la **basse est renforcée de +3 dB** pour bien ressortir face à la batterie : ses notes graves passent mal sur de petits haut-parleurs.
 - Le click marque chaque temps : un son aigu sur le premier temps de la mesure, plus grave et plus doux sur les autres.
 - Son tempo est **constant pendant 4 mesures**, calé sur les temps réellement joués pendant ces 4 mesures, puis il se réajuste pour les 4 suivantes. Il colle à la musique sans la suivre note à note : à l'intérieur d'un bloc, on entend si le groupe presse ou ralentit par rapport au click.
 - Le premier temps de la mesure est repéré sur les pistes séparées : la grosse caisse frappe surtout sur les temps 1 et 3, la caisse claire sur 2 et 4, et la basse change de note en début de mesure.
 - Les clicks sont calés sur le début des frappes de la batterie, pour sonner en même temps qu'elle.
 
-Réglages : `--temps-par-mesure 3` pour une valse (4 par défaut), `--mesures-click 8` pour réajuster le tempo toutes les 8 mesures, `--volume-click 6` pour un click plus fort (ou `-6` plus doux). `--sans-groove` ne produit pas cette piste.
+Réglages : `--basse-groove 6` pour une basse encore plus présente (`0` = même équilibre que le MP3 complet), `--temps-par-mesure 3` pour une valse (4 par défaut), `--mesures-click 8` pour réajuster le tempo toutes les 8 mesures, `--volume-click 6` pour un click plus fort (ou `-6` plus doux). `--sans-groove` ne produit pas cette piste.
 
 > Sans pulsation régulière (morceau joué librement), la piste groove est produite sans click. Le repérage du premier temps peut se tromper sur un rythme inhabituel : l'accent tombe alors sur un autre temps, mais le click reste sur les temps.
 
@@ -216,6 +216,7 @@ Réglages : `--temps-par-mesure 3` pour une valse (4 par défaut), `--mesures-cl
 | `--temps-par-mesure 3` | temps par mesure pour le click (4 par défaut) |
 | `--mesures-click 4` | le tempo du click est réajusté toutes les N mesures |
 | `--volume-click 6` | click plus fort (en dB, `-6` = plus doux) |
+| `--basse-groove 6` | renfort de la basse dans la piste `-groove`, en dB (+3 par défaut) |
 | `--bpm-min 50` / `--bpm-max 200` | plage de tempos recherchée par l'analyse |
 | `--debit 256` | débit MP3 en kb/s |
 | `--gain-max-db 12` | correction maximale de l'équilibrage, pour ne pas trop amplifier un instrument qui joue peu |

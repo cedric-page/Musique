@@ -73,6 +73,9 @@ def basse_par_mesure(duree, tempo, debut_mesure=0, temps_par_mesure=4):
         mesure = (k - debut_mesure) // temps_par_mesure
         f = 440 * 2 ** ((notes[mesure % len(notes)] - 69) / 12)
         i = int(instant * SR)
-        son = (np.sin(2 * np.pi * f * t) + 0.5 * np.sin(4 * np.pi * f * t)) * np.exp(-t / 0.25) * 0.3
+        # Comme une basse électrique : fondamentale et harmoniques (jusqu'à la 8e), qui
+        # la rendent audible même là où ses notes graves ne passent pas.
+        timbre = sum(np.sin(2 * np.pi * h * f * t) / h**0.8 for h in range(1, 9))
+        son = timbre * np.exp(-t / 0.25) * 0.15
         sortie[i : i + son.size] += son[: sortie.size - i]
     return sortie.astype(np.float32)

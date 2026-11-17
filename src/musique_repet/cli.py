@@ -159,6 +159,16 @@ def construire_parseur() -> argparse.ArgumentParser:
         help="volume du click par rapport à son réglage automatique, en dB (+6 plus fort, -6 plus doux)",
     )
     p.add_argument(
+        "--basse-groove",
+        type=float,
+        default=ParametresGroove.gain_basse_db,
+        metavar="DB",
+        help=(
+            "renfort de la basse dans la piste -groove par rapport au mixage complet "
+            f"(défaut : +{ParametresGroove.gain_basse_db:g} dB)"
+        ),
+    )
+    p.add_argument(
         "--bpm-min",
         type=float,
         default=ParametresTempo.bpm_min,
@@ -232,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
         tempo=None if args.sans_tempo else ParametresTempo(bpm_min=args.bpm_min, bpm_max=args.bpm_max),
         groove=None
         if args.sans_groove
-        else ParametresGroove(args.temps_par_mesure, args.mesures_click, args.volume_click),
+        else ParametresGroove(args.temps_par_mesure, args.mesures_click, args.volume_click, args.basse_groove),
         forcer_separation=args.forcer_separation,
     )
     if args.sans_rognage:
