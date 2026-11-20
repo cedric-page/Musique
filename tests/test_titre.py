@@ -211,7 +211,7 @@ def preparer(tmp_path, pistes, nom="repet_mardi.wav"):
 
 def options(entree, sortie, **kw):
     # Anti-écho et tempo, testés par ailleurs, sont coupés pour accélérer ces tests.
-    reglages = {"anti_echo": ParametresAntiEcho(attenuation_max_db=0), "tempo": None, "groove": None, **kw}
+    reglages = {"anti_echo": ParametresAntiEcho(attenuation_max_db=0), "tempo": None, **kw}
     return Options(
         entree=entree, sortie=sortie, travail=sortie / "_travail",
         facteurs=charger_config(None), mixage=ParametresMixage(), **reglages,

@@ -49,17 +49,9 @@ class ParametresMixage:
     crete_max_db: float = -1.0
     """Crête maximale du mixage final (dBFS)."""
     chorus: dict[str, ParametresChorus] = field(
-        default_factory=lambda: {
-            "voix": ParametresChorus(),
-            "lead": ParametresChorus(),
-            "choeurs": ParametresChorus(),
-            "basse": CHORUS_BASSE,
-        }
+        default_factory=lambda: {"voix": ParametresChorus(), "basse": CHORUS_BASSE}
     )
     """Pistes recevant un chorus, avec leurs réglages."""
-    pistes_liees: dict[str, str] = field(default_factory=lambda: {"choeurs": "lead"})
-    """Pistes qui reçoivent la même correction d'équilibrage qu'une autre : les chœurs
-    suivent le lead, pour garder l'équilibre entre les chanteuses tel qu'il a été chanté."""
 
 
 @dataclass
@@ -80,54 +72,21 @@ def calculer_equilibrage(
     """Calcule le gain de chaque piste pour les amener à la même sonie.
 
     La cible est la médiane des pistes actives, ce qui conserve le niveau
-    global. Les pistes muettes ou exclues ne sont pas modifiées. Une piste liée
-    (les chœurs) reçoit la même correction que sa piste de référence (le lead).
+    global. Les pistes muettes ou exclues ne sont pas modifiées.
     """
-    def active(nom: str) -> bool:
-        return sonies.get(nom, -math.inf) > params.seuil_silence_lufs
-
-    liees = {
-        nom: reference
-        for nom, reference in params.pistes_liees.items()
-        if nom in sonies and active(reference) and reference not in params.exclues_equilibrage
-    }
     actives = {
         nom: lufs
         for nom, lufs in sonies.items()
-        if active(nom) and nom not in params.exclues_equilibrage and nom not in liees
+        if lufs > params.seuil_silence_lufs and nom not in params.exclues_equilibrage
     }
     cible = float(np.median(list(actives.values()))) if actives else None
-    gains = {
-        nom: float(np.clip(cible - lufs, -params.gain_max_db, params.gain_max_db))
-        for nom, lufs in actives.items()
-        if cible is not None
-    }
-    for nom, reference in liees.items():
-        if active(nom):
-            gains[nom] = gains.get(reference, 0.0)
-    return [ReglagePiste(nom, lufs, gains.get(nom, 0.0), facteurs_config.get(nom, 1.0)) for nom, lufs in sonies.items()]
-
-
-def piste_traitee(
-    chemin: Path, reglage: ReglagePiste, params: ParametresMixage, zone: tuple[float, float] | None = None
-) -> tuple[np.ndarray, int]:
-    """Une piste telle qu'elle entre dans le mixage : chorus éventuel, puis gain total."""
-    audio, sr = audio_io.lire(chemin, *(zone or ()))
-    if reglage.nom in params.chorus:
-        audio = chorus(audio, sr, params.chorus[reglage.nom])
-    audio *= reglage.facteur_total
-    return audio, sr
-
-
-def additionner(mix: np.ndarray | None, audio: np.ndarray) -> np.ndarray:
-    """Ajoute ``audio`` au mixage en cours (le plus court est complété par du silence)."""
-    if mix is None:
-        return audio
-    n = max(mix.shape[0], audio.shape[0])
-    if mix.shape[0] < n:
-        mix = np.pad(mix, ((0, n - mix.shape[0]), (0, 0)))
-    mix[: audio.shape[0]] += audio
-    return mix
+    reglages = []
+    for nom, lufs in sonies.items():
+        gain = 0.0
+        if cible is not None and nom in actives:
+            gain = float(np.clip(cible - lufs, -params.gain_max_db, params.gain_max_db))
+        reglages.append(ReglagePiste(nom, lufs, gain, facteurs_config.get(nom, 1.0)))
+    return reglages
 
 
 def mixer(
@@ -157,8 +116,17 @@ def mixer(
     for reglage in reglages:
         if reglage.facteur_total == 0:
             continue
-        audio, _ = piste_traitee(pistes[reglage.nom], reglage, params, zone)
-        mix = additionner(mix, audio)
+        audio, sr = audio_io.lire(pistes[reglage.nom], *(zone or ()))
+        if reglage.nom in params.chorus:
+            audio = chorus(audio, sr, params.chorus[reglage.nom])
+        audio *= reglage.facteur_total
+        if mix is None:
+            mix = audio
+        else:
+            n = max(mix.shape[0], audio.shape[0])
+            if mix.shape[0] < n:
+                mix = np.pad(mix, ((0, n - mix.shape[0]), (0, 0)))
+            mix[: audio.shape[0]] += audio
         del audio
 
     if mix is None:

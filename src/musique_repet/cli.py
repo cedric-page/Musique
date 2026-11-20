@@ -16,8 +16,6 @@ from .pipeline import Options, executer
 from .empreinte import ReconnaisseurShazam
 from .paroles import TranscripteurWhisper
 from .separation import MODELE_PAR_DEFAUT, SeparateurDemucs
-from .voix import MODELE_PAR_DEFAUT as MODELE_CHOEURS, SeparateurLeadChoeurs
-from .groove import ParametresGroove
 from .tempo import ParametresTempo
 from .titre import ParametresTitre, lire_repertoire
 
@@ -48,17 +46,6 @@ def construire_parseur() -> argparse.ArgumentParser:
     p.add_argument("--appareil", choices=["cpu", "cuda", "mps"], help="calcul de la séparation (défaut : auto)")
     p.add_argument("--shifts", type=int, default=1, help="passes de séparation, plus = meilleur mais plus lent")
     p.add_argument("--forcer-separation", action="store_true", help="refait la séparation même si elle est en cache")
-    p.add_argument(
-        "--sans-choeurs",
-        action="store_true",
-        help="garde une seule piste voix au lieu de séparer la voix lead et les chœurs",
-    )
-    p.add_argument(
-        "--modele-choeurs",
-        default=MODELE_CHOEURS,
-        metavar="MODELE",
-        help=f"modèle « karaoké » d'audio-separator qui sépare lead et chœurs (défaut : {MODELE_CHOEURS})",
-    )
     p.add_argument("--debit", type=int, default=192, help="débit MP3 en kb/s (défaut : 192)")
     p.add_argument("--lufs-cible", type=float, default=-14.0, help="sonie du MP3 final (défaut : -14 LUFS)")
     p.add_argument("--gain-max-db", type=float, default=12.0, help="correction max. de l'équilibrage (défaut : 12 dB)")
@@ -91,10 +78,7 @@ def construire_parseur() -> argparse.ArgumentParser:
         type=float,
         default=ParametresChorus.melange,
         metavar="DOSAGE",
-        help=(
-            f"dosage du chorus sur les voix (lead et chœurs), 0 pour le désactiver "
-            f"(défaut : {ParametresChorus.melange})"
-        ),
+        help=f"dosage du chorus sur les voix, 0 pour le désactiver (défaut : {ParametresChorus.melange})",
     )
     p.add_argument(
         "--chorus-basse",
@@ -134,40 +118,6 @@ def construire_parseur() -> argparse.ArgumentParser:
         help="modèle Whisper de transcription : tiny, base, small, medium, large-v3 (défaut : small)",
     )
     p.add_argument("--sans-tempo", action="store_true", help="ne produit pas le graphique du tempo (JPG)")
-    p.add_argument(
-        "--sans-groove", action="store_true", help="ne produit pas la piste -groove (batterie, basse et click)"
-    )
-    p.add_argument(
-        "--temps-par-mesure",
-        type=int,
-        default=ParametresGroove.temps_par_mesure,
-        metavar="N",
-        help=f"temps par mesure pour le click (défaut : {ParametresGroove.temps_par_mesure} ; 3 pour une valse)",
-    )
-    p.add_argument(
-        "--mesures-click",
-        type=int,
-        default=ParametresGroove.mesures_par_bloc,
-        metavar="N",
-        help=f"le tempo du click est réajusté toutes les N mesures (défaut : {ParametresGroove.mesures_par_bloc})",
-    )
-    p.add_argument(
-        "--volume-click",
-        type=float,
-        default=ParametresGroove.volume_click_db,
-        metavar="DB",
-        help="volume du click par rapport à son réglage automatique, en dB (+6 plus fort, -6 plus doux)",
-    )
-    p.add_argument(
-        "--basse-groove",
-        type=float,
-        default=ParametresGroove.gain_basse_db,
-        metavar="DB",
-        help=(
-            "renfort de la basse dans la piste -groove par rapport au mixage complet "
-            f"(défaut : +{ParametresGroove.gain_basse_db:g} dB)"
-        ),
-    )
     p.add_argument(
         "--bpm-min",
         type=float,
@@ -212,8 +162,6 @@ def main(argv: list[str] | None = None) -> int:
         parseur.error("--rt60 doit être positif")
     if not 30 <= args.bpm_min < args.bpm_max <= 400:
         parseur.error("il faut 30 <= --bpm-min < --bpm-max <= 400")
-    if args.temps_par_mesure < 1 or args.mesures_click < 1:
-        parseur.error("--temps-par-mesure et --mesures-click doivent être positifs")
     try:
         facteurs = charger_config(args.config)
     except (OSError, ValueError) as exc:
@@ -231,7 +179,7 @@ def main(argv: list[str] | None = None) -> int:
             chorus={
                 nom: params
                 for nom, params in (
-                    *((nom, ParametresChorus(melange=args.chorus)) for nom in ("voix", "lead", "choeurs")),
+                    ("voix", ParametresChorus(melange=args.chorus)),
                     ("basse", replace(CHORUS_BASSE, melange=args.chorus_basse)),
                 )
                 if params.melange > 0
@@ -240,9 +188,6 @@ def main(argv: list[str] | None = None) -> int:
         debit_kbps=args.debit,
         anti_echo=ParametresAntiEcho(rt60=args.rt60, attenuation_max_db=args.anti_echo),
         tempo=None if args.sans_tempo else ParametresTempo(bpm_min=args.bpm_min, bpm_max=args.bpm_max),
-        groove=None
-        if args.sans_groove
-        else ParametresGroove(args.temps_par_mesure, args.mesures_click, args.volume_click, args.basse_groove),
         forcer_separation=args.forcer_separation,
     )
     if args.sans_rognage:
@@ -265,8 +210,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.sans_shazam:
             reconnaisseur = ReconnaisseurShazam()
     separateur = SeparateurDemucs(args.modele, appareil=args.appareil, shifts=args.shifts)
-    separateur_voix = None if args.sans_choeurs else SeparateurLeadChoeurs(args.modele_choeurs)
-    echecs = executer(options, separateur, transcripteur, reconnaisseur, separateur_voix)
+    echecs = executer(options, separateur, transcripteur, reconnaisseur)
     if echecs:
         log.error("%d élément(s) en échec", echecs)
         return 1

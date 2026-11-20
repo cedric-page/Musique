@@ -28,8 +28,6 @@ from scipy.ndimage import median_filter
 log = logging.getLogger(__name__)
 
 INSTRUMENTS = ("batterie", "basse", "guitare", "piano")
-VOIX = ("voix", "lead", "choeurs")
-"""Pistes de chant : elles comptent ensemble pour une seule source (on chante ou pas)."""
 
 
 @dataclass(frozen=True)
@@ -135,7 +133,7 @@ def _prolonger_apres(masque: np.ndarray, fin: int, trou: int, maximum: int) -> i
 
 def detecter_chanson(pistes: dict[str, Path], params: ParametresRognage = ParametresRognage()) -> Extrait:
     """Trouve le début et la fin de la chanson à partir des pistes séparées."""
-    noms = [n for n in (*INSTRUMENTS, *VOIX) if n in pistes]
+    noms = [n for n in (*INSTRUMENTS, "voix") if n in pistes]
     if not noms:
         noms = list(pistes)
     niveaux: dict[str, np.ndarray] = {}
@@ -162,13 +160,8 @@ def detecter_chanson(pistes: dict[str, Path], params: ParametresRognage = Parame
     }
     if not actif:
         return tout
-    instruments = sum((actif[nom].astype(np.int8) for nom in retenues if nom not in VOIX), np.zeros(n, np.int8))
-    chant = np.zeros(n, bool)
-    for nom in VOIX:
-        if nom in actif:
-            chant |= actif[nom]
-    sources = instruments + chant.astype(np.int8)
-    nb_sources = sum(nom not in VOIX for nom in retenues) + any(nom in VOIX for nom in retenues)
+    instruments = sum((actif[nom].astype(np.int8) for nom in retenues if nom != "voix"), np.zeros(n, np.int8))
+    sources = instruments + actif.get("voix", np.zeros(n, bool)).astype(np.int8)
 
     # Nombre de sources qui jouent ensemble au plus fort du morceau (tenu au moins
     # la moitié de la durée minimale, quelle que soit la longueur des bavardages
@@ -176,7 +169,7 @@ def detecter_chanson(pistes: dict[str, Path], params: ParametresRognage = Parame
     trames_par_s = 1.0 / params.pas_s
     tenue = params.duree_min_s / 2 * trames_par_s
     ensemble = next(
-        (k for k in range(nb_sources, 1, -1) if any(f - d >= tenue for d, f in _plages(sources >= k))), 1
+        (k for k in range(len(retenues), 1, -1) if any(f - d >= tenue for d, f in _plages(sources >= k))), 1
     )
     seuil = max(2, math.ceil(0.6 * ensemble))
     plages = _plages(sources >= seuil)

@@ -37,7 +37,6 @@ def sinus(duree, freq=440.0, amplitude=0.3, canaux=2):
 
 
 def options(entree: Path, sortie: Path, **kw) -> Options:
-    kw.setdefault("groove", None)  # piste groove testée à part (test_groove.py)
     return Options(
         entree=entree,
         sortie=sortie,

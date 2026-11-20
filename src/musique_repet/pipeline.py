@@ -17,14 +17,12 @@ from .chanson import ParametresRognage, detecter_chanson
 from .decoupe import Morceau, lire_csv, nom_fichier_sur
 from .echo import ParametresAntiEcho, attenuer_echo_avec_cache
 from .graphique_tempo import tracer as tracer_tempo
-from .groove import ParametresGroove, mixer_groove
 from .mixage import ParametresMixage, ReglagePiste, fondus, mixer
 from .empreinte import ReconnaisseurAudio, identifier
 from .paroles import Transcripteur
 from .separation import Separateur, separer_avec_cache
 from .tempo import ParametresTempo, analyser_pistes
 from .titre import ParametresTitre, reconnaitre_titre
-from .voix import SeparateurVoix, separer_voix_avec_cache
 
 log = logging.getLogger(__name__)
 
@@ -56,8 +54,6 @@ class Options:
     anti_echo: ParametresAntiEcho = field(default_factory=ParametresAntiEcho)
     tempo: ParametresTempo | None = field(default_factory=ParametresTempo)
     """Réglages de l'analyse du tempo ; ``None`` pour ne pas produire de graphique."""
-    groove: ParametresGroove | None = field(default_factory=ParametresGroove)
-    """Piste « -groove » (batterie, basse et click) ; ``None`` pour ne pas la produire."""
     rognage: ParametresRognage | None = field(default_factory=ParametresRognage)
     """Sans CSV : retrait de ce qui précède et suit la chanson ; ``None`` pour tout garder."""
     titres: ParametresTitre | None = field(default_factory=ParametresTitre)
@@ -190,11 +186,9 @@ def _reconnaitre(
             log.info(
                 "  Pas de réponse sûre de %s : reconnaissance d'après les paroles", reconnaisseur.identifiant.capitalize()
             )
-    # Les paroles se transcrivent mieux sur la voix lead seule que sur toutes les voix.
-    chant = pistes.get("lead") or pistes.get("voix")
-    if trouve is None and transcripteur is not None and chant is not None:
+    if trouve is None and transcripteur is not None and "voix" in pistes:
         try:
-            trouve = reconnaitre_titre(chant, debut, fin, tache.dossier_pistes, transcripteur, options.titres)
+            trouve = reconnaitre_titre(pistes["voix"], debut, fin, tache.dossier_pistes, transcripteur, options.titres)
         except Exception as exc:  # modèle introuvable, pas de connexion au premier usage...
             log.warning("  Reconnaissance d'après les paroles impossible (%s)", exc)
             log.debug("  Détail :", exc_info=True)
@@ -213,13 +207,9 @@ def traiter_tache(
     transcripteur: Transcripteur | None = None,
     noms_pris: set[str] | None = None,
     reconnaisseur: ReconnaisseurAudio | None = None,
-    separateur_voix: SeparateurVoix | None = None,
 ) -> None:
     log.info("▶ %s", tache.nom_affiche)
     pistes = separer_avec_cache(tache.wav, tache.dossier_pistes, separateur, options.forcer_separation)
-    pistes = separer_voix_avec_cache(
-        pistes, tache.dossier_pistes / "lead_choeurs", separateur_voix, options.forcer_separation
-    )
     pistes = attenuer_echo_avec_cache(pistes, tache.dossier_pistes / "sans_echo", options.anti_echo)
 
     zone = None
@@ -234,40 +224,23 @@ def traiter_tache(
     if noms_pris is not None:
         tache.mp3 = _nom_libre(tache.mp3, noms_pris)
 
-    def adoucir(audio, sr_audio):
-        """Fondus d'entrée et de sortie quand la chanson a été découpée dans l'enregistrement."""
-        if extrait is None or zone is None:
-            return audio
-        return fondus(
-            audio,
-            sr_audio,
+    mix, sr, reglages = mixer(pistes, options.facteurs, options.mixage, zone)
+    if extrait is not None and zone is not None:
+        mix = fondus(
+            mix,
+            sr,
             entree_s=0.1 if extrait.debut > 0 else 0.0,
             sortie_s=1.0 if extrait.fin < extrait.duree_totale else 0.0,
         )
-
-    mix, sr, reglages = mixer(pistes, options.facteurs, options.mixage, zone)
     _journaliser_reglages(reglages)
-    audio_io.ecrire_mp3(tache.mp3, adoucir(mix, sr), sr, options.debit_kbps)
+    audio_io.ecrire_mp3(tache.mp3, mix, sr, options.debit_kbps)
     log.info("  ✔ %s", tache.mp3)
-    del mix
-
-    analyse = None
-    if options.tempo is not None or options.groove is not None:
-        analyse = analyser_pistes(pistes, options.tempo or ParametresTempo(), zone)
-        log.info("  Tempo : %s", analyse.resume())
     if options.tempo is not None:
+        analyse = analyser_pistes(pistes, options.tempo, zone)
+        log.info("  Tempo : %s", analyse.resume())
         graphique = tache.mp3.with_name(f"{tache.mp3.stem}-tempo.jpg")
         tracer_tempo(analyse, graphique, tache.titre or tache.mp3.stem, tache.date or None)
         log.info("  ✔ %s", graphique)
-    if options.groove is not None:
-        groove, sr_groove, click = mixer_groove(pistes, reglages, options.mixage, zone, analyse, options.groove)
-        chemin = tache.mp3.with_name(f"{tache.mp3.stem}-groove.mp3")
-        audio_io.ecrire_mp3(chemin, adoucir(groove, sr_groove), sr_groove, options.debit_kbps)
-        if click is None:
-            log.info("  Groove : pas de pulsation régulière, batterie et basse sans click")
-        else:
-            log.info("  Groove : %s", click.resume(options.groove.mesures_par_bloc))
-        log.info("  ✔ %s", chemin)
 
 
 def executer(
@@ -275,12 +248,8 @@ def executer(
     separateur: Separateur,
     transcripteur: Transcripteur | None = None,
     reconnaisseur: ReconnaisseurAudio | None = None,
-    separateur_voix: SeparateurVoix | None = None,
 ) -> int:
     """Traite tous les audios du dossier d'entrée. Renvoie le nombre d'échecs.
-
-    ``separateur_voix`` : sépare la piste voix en voix lead et chœurs (``None`` :
-    une seule piste voix).
 
     Pour reconnaître le titre des enregistrements sans CSV : ``reconnaisseur``
     (empreinte audio, façon Shazam) puis ``transcripteur`` (paroles). Sans l'un
@@ -303,7 +272,7 @@ def executer(
             continue
         for tache in taches:
             try:
-                traiter_tache(tache, separateur, options, transcripteur, noms_pris, reconnaisseur, separateur_voix)
+                traiter_tache(tache, separateur, options, transcripteur, noms_pris, reconnaisseur)
             except Exception:
                 log.exception("Échec du traitement de %s", tache.nom_affiche)
                 echecs += 1
